@@ -8,6 +8,7 @@ module Hasura.Backends.Postgres.Execute.Types
     PGExecCtxInfo (..),
     PGExecTxType (..),
     mkPGExecCtx,
+    mkPGExecCtxWithReadReplicas,
     mkTxErrorHandler,
     defaultTxErrorHandler,
     dmlTxErrorHandler,
@@ -63,6 +64,7 @@ import Hasura.SQL.Types (ExtensionsSchema, toSQL)
 import Kriti.Error qualified as Kriti
 import Kriti.Parser qualified as Kriti
 import Network.HTTP.Types qualified as HTTP
+import System.Random (randomRIO)
 
 -- See Note [Existentially Quantified Types]
 type RunTx =
@@ -113,35 +115,8 @@ data PGExecFrom
 -- | Creates a Postgres execution context for a single Postgres master pool
 mkPGExecCtx :: PG.TxIsolation -> PG.PGPool -> ResizePoolStrategy -> PGExecCtx
 mkPGExecCtx defaultIsoLevel pool resizeStrategy =
-  PGExecCtx
-    { _pecDestroyConnections =
-        -- \| Destroys connection pools
-        PG.destroyPGPool pool,
-      _pecResizePools = \serverReplicas ->
-        -- \| Resize pools based on number of server instances
-        case resizeStrategy of
-          NeverResizePool -> pure noPoolsResizedSummary
-          ResizePool maxConnections -> resizePostgresPool' maxConnections serverReplicas,
-      _pecRunTx = \case
-        -- \| Run a read only statement without an explicit transaction block
-        (PGExecCtxInfo NoTxRead _) -> PG.runTx' pool
-        -- \| Run a read-write statement without an explicit transaction block
-        (PGExecCtxInfo NoTxReadWrite _) -> PG.runTx' pool
-        -- \| Run a transaction
-        (PGExecCtxInfo (Tx txAccess (Just isolationLevel)) _) -> PG.runTx pool (isolationLevel, Just txAccess)
-        (PGExecCtxInfo (Tx txAccess Nothing) _) -> PG.runTx pool (defaultIsoLevel, Just txAccess)
-    }
-  where
-    resizePostgresPool' maxConnections serverReplicas = do
-      -- Resize the pool
-      resizePostgresPool pool maxConnections serverReplicas
-      -- Return the summary. Only the primary pool is resized
-      pure
-        $ SourceResizePoolSummary
-          { _srpsPrimaryResized = True,
-            _srpsReadReplicasResized = False,
-            _srpsConnectionSet = []
-          }
+  -- Simply delegate to the new function with no read replicas
+  mkPGExecCtxWithReadReplicas defaultIsoLevel pool Nothing resizeStrategy
 
 -- | Resize Postgres pool by setting the number of connections equal to
 -- allowed maximum connections across all server instances divided by
@@ -149,6 +124,77 @@ mkPGExecCtx defaultIsoLevel pool resizeStrategy =
 resizePostgresPool :: PG.PGPool -> Int -> ServerReplicas -> IO ()
 resizePostgresPool pool maxConnections serverReplicas =
   PG.resizePGPool pool (maxConnections `div` getServerReplicasInt serverReplicas)
+
+-- | Creates a Postgres execution context with support for read replicas
+mkPGExecCtxWithReadReplicas :: PG.TxIsolation -> PG.PGPool -> Maybe (NonEmpty PG.PGPool) -> ResizePoolStrategy -> PGExecCtx
+mkPGExecCtxWithReadReplicas defaultIsoLevel primaryPool maybeReadReplicaPools resizeStrategy =
+  PGExecCtx
+    { _pecDestroyConnections = do
+        -- Destroy primary pool
+        PG.destroyPGPool primaryPool
+        -- Destroy read replica pools if any
+        maybe (pure ()) (traverse_ PG.destroyPGPool) maybeReadReplicaPools,
+      _pecResizePools = \serverReplicas ->
+        case resizeStrategy of
+          NeverResizePool -> pure noPoolsResizedSummary
+          ResizePool maxConnections -> resizeAllPools maxConnections serverReplicas,
+      _pecRunTx = \execCtxInfo -> 
+        case execCtxInfo of
+          -- For read operations, try to use read replicas if available
+          (PGExecCtxInfo NoTxRead _) -> 
+            case maybeReadReplicaPools of
+              Nothing -> PG.runTx' primaryPool
+              Just readReplicaPools -> selectAndRunOnReadReplica readReplicaPools
+          -- All write operations go to primary
+          (PGExecCtxInfo NoTxReadWrite _) -> PG.runTx' primaryPool
+          (PGExecCtxInfo (Tx PG.ReadOnly (Just isolationLevel)) _) -> 
+            case maybeReadReplicaPools of
+              Nothing -> PG.runTx primaryPool (isolationLevel, Just PG.ReadOnly)
+              Just readReplicaPools -> selectAndRunOnReadReplicaTx readReplicaPools isolationLevel
+          (PGExecCtxInfo (Tx PG.ReadOnly Nothing) _) -> 
+            case maybeReadReplicaPools of
+              Nothing -> PG.runTx primaryPool (defaultIsoLevel, Just PG.ReadOnly)
+              Just readReplicaPools -> selectAndRunOnReadReplicaTx readReplicaPools defaultIsoLevel
+          -- Write transactions always go to primary
+          (PGExecCtxInfo (Tx PG.ReadWrite (Just isolationLevel)) _) -> 
+            PG.runTx primaryPool (isolationLevel, Just PG.ReadWrite)
+          (PGExecCtxInfo (Tx PG.ReadWrite Nothing) _) -> 
+            PG.runTx primaryPool (defaultIsoLevel, Just PG.ReadWrite)
+    }
+  where
+    resizeAllPools maxConnections serverReplicas = do
+      -- Resize primary pool
+      resizePostgresPool primaryPool maxConnections serverReplicas
+      -- Resize read replica pools
+      readReplicasResized <- case maybeReadReplicaPools of
+        Nothing -> pure False
+        Just readReplicaPools -> do
+          traverse_ (\pool -> resizePostgresPool pool maxConnections serverReplicas) readReplicaPools
+          pure True
+      pure $ SourceResizePoolSummary
+        { _srpsPrimaryResized = True,
+          _srpsReadReplicasResized = readReplicasResized,
+          _srpsConnectionSet = []
+        }
+    
+    -- Select a random read replica and run the query
+    selectAndRunOnReadReplica :: (MonadIO m, MonadBaseControl IO m) => NonEmpty PG.PGPool -> PG.TxET QErr m a -> ExceptT QErr m a
+    selectAndRunOnReadReplica readReplicaPools tx = do
+      selectedPool <- liftIO $ selectRandomReadReplica readReplicaPools
+      PG.runTx' selectedPool tx
+    
+    -- Select a random read replica and run the transaction
+    selectAndRunOnReadReplicaTx :: (MonadIO m, MonadBaseControl IO m) => NonEmpty PG.PGPool -> PG.TxIsolation -> PG.TxET QErr m a -> ExceptT QErr m a
+    selectAndRunOnReadReplicaTx readReplicaPools isolationLevel tx = do
+      selectedPool <- liftIO $ selectRandomReadReplica readReplicaPools
+      PG.runTx selectedPool (isolationLevel, Just PG.ReadOnly) tx
+    
+    -- Randomly select a read replica from the list
+    selectRandomReadReplica :: NonEmpty PG.PGPool -> IO PG.PGPool
+    selectRandomReadReplica readReplicaPools = do
+      let replicaList = List.NonEmpty.toList readReplicaPools
+      idx <- randomRIO (0, length replicaList - 1)
+      pure $ replicaList !! idx
 
 defaultTxErrorHandler :: PG.PGTxErr -> QErr
 defaultTxErrorHandler = mkTxErrorHandler $ \case

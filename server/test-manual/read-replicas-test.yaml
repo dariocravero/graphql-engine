@@ -1,0 +1,28 @@
+# Sample metadata configuration for testing read replica support
+# This shows how to configure a Postgres source with read replicas
+
+type: pg_add_source
+args:
+  name: test_db_with_replicas
+  configuration:
+    connection_info:
+      database_url:
+        from_env: PRIMARY_DATABASE_URL
+      pool_settings:
+        max_connections: 50
+        idle_timeout: 180
+        retries: 1
+    read_replicas:
+      - database_url:
+          from_env: REPLICA1_DATABASE_URL
+        pool_settings:
+          max_connections: 30
+          idle_timeout: 180
+          retries: 1
+      - database_url:
+          from_env: REPLICA2_DATABASE_URL
+        pool_settings:
+          max_connections: 30
+          idle_timeout: 180
+          retries: 1
+    extensions_schema: public

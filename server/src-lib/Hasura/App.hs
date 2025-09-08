@@ -78,6 +78,7 @@ import Data.ByteString.Lazy.Char8 qualified as BLC
 import Data.Environment qualified as Env
 import Data.FileEmbed (makeRelativeToProject)
 import Data.HashMap.Strict qualified as HashMap
+import Data.List.NonEmpty qualified as List.NonEmpty
 import Data.Set.NonEmpty qualified as NE
 import Data.Text qualified as T
 import Data.Time.Clock (UTCTime)
@@ -1527,9 +1528,37 @@ mkPgSourceResolver pgLogger env sourceName config = runExceptT do
           }
   let context = J.object [("source" J..= sourceName)]
   pgPool <- liftIO $ Q.initPGPool connInfo context connParams pgLogger
-  let pgExecCtx = mkPGExecCtx isoLevel pgPool NeverResizePool
+  
+  -- Initialize read replica pools if configured
+  (readReplicaPools, readReplicaConnInfosWithFinalizer) <- case pccReadReplicas config of
+    Nothing -> pure (Nothing, Nothing)
+    Just readReplicaConfigs -> do
+      replicaResults <- forM readReplicaConfigs $ \replicaConfig -> do
+        let PostgresSourceConnInfo replicaUrlConf replicaPoolSettings replicaAllowPrepare _ _ = replicaConfig
+        -- Use same defaults as primary if not specified
+        let (replicaMaxConns, replicaIdleTimeout, replicaRetries) = 
+              getDefaultPGPoolSettingIfNotExists replicaPoolSettings defaultPostgresPoolSettings
+        replicaConnDetails <- resolveUrlConf env replicaUrlConf
+        let replicaConnInfo = PG.ConnInfo replicaRetries replicaConnDetails
+            replicaConnParams =
+              PG.defaultConnParams
+                { PG.cpIdleTime = replicaIdleTimeout,
+                  PG.cpConns = replicaMaxConns,
+                  PG.cpAllowPrepare = replicaAllowPrepare,
+                  PG.cpMbLifetime = ppsConnectionLifetime =<< replicaPoolSettings,
+                  PG.cpTimeout = ppsPoolTimeout =<< replicaPoolSettings
+                }
+            replicaContext = J.object [("source" J..= sourceName), ("replica" J..= True)]
+        replicaPool <- liftIO $ Q.initPGPool replicaConnInfo replicaContext replicaConnParams pgLogger
+        replicaConnInfoWithFinalizer <- liftIO $ mkConnInfoWithFinalizer replicaConnInfo (pure ())
+        pure (replicaPool, replicaConnInfoWithFinalizer)
+      let replicaResultsList = List.NonEmpty.toList replicaResults
+          (replicaPools, replicaConnInfos) = unzip replicaResultsList
+      pure (Just (List.NonEmpty.fromList replicaPools), Just (List.NonEmpty.fromList replicaConnInfos))
+  
+  let pgExecCtx = mkPGExecCtxWithReadReplicas isoLevel pgPool readReplicaPools NeverResizePool
   connInfoWithFinalizer <- liftIO $ mkConnInfoWithFinalizer connInfo (pure ())
-  pure $ PGSourceConfig pgExecCtx connInfoWithFinalizer Nothing mempty (pccExtensionsSchema config) mempty ConnTemplate_NotApplicable
+  pure $ PGSourceConfig pgExecCtx connInfoWithFinalizer readReplicaConnInfosWithFinalizer mempty (pccExtensionsSchema config) mempty ConnTemplate_NotApplicable
 
 mkMSSQLSourceResolver :: SourceResolver 'MSSQL
 mkMSSQLSourceResolver env _name (MSSQLConnConfiguration connInfo _) = runExceptT do
