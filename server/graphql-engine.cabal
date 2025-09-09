@@ -296,6 +296,7 @@ common lib-depends
                      , free
                      , hashable
                      , hasura-base
+                     , hedis
                      , hasura-extras
                      , hasura-json-encoding
                      , hasura-prelude
@@ -362,6 +363,7 @@ common lib-depends
                      , uuid
                      , base16-bytestring
                      , cereal
+                     , crypton
                      , cryptohash-md5
 
                      -- Logging related
@@ -662,6 +664,9 @@ library
 
                      -- Exposed for benchmark:
                      , Hasura.Cache.Bounded
+                     , Hasura.Cache
+                     , Hasura.Cache.Config
+                     , Hasura.Cache.Redis
                      , Hasura.CredentialCache
                      , Hasura.CachedTime
                      , Hasura.Logging

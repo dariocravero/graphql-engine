@@ -32,6 +32,7 @@ import Database.PG.Query qualified as PG
 import Hasura.Authentication.Role (RoleName)
 import Hasura.Backends.DataConnector.Agent.Client (AgentLicenseKey)
 import Hasura.Base.Error
+import Hasura.Cache (HasuraCache)
 import Hasura.CredentialCache
 import Hasura.Eventing.Common (LockedEventsCtx)
 import Hasura.Eventing.EventTrigger
@@ -149,7 +150,8 @@ data AppEnv = AppEnv
     appEnvPersistedQueries :: PersistedQueriesState,
     appEnvPersistedQueriesTtl :: Int,
     appEnvPreserve401Errors :: Preserve401ErrorsStatus,
-    appServerTimeout :: Refined NonNegative Int
+    appServerTimeout :: Refined NonNegative Int,
+    appEnvCache :: Maybe HasuraCache
   }
 
 -- | Represents the Dynamic Hasura State, these field are mutable and can be changed

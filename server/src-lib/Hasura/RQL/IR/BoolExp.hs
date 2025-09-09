@@ -42,6 +42,8 @@ module Hasura.RQL.IR.BoolExp
     RootOrCurrent (..),
     RemoteRelPermBoolExp (..),
     RemoteRelRHSFetchInfo (..),
+    getSessionVariablesFromBoolExp,
+    getSessionVariablesFromAnnBoolExpPartialSQL,
   )
 where
 
@@ -53,6 +55,7 @@ import Data.Aeson.Key qualified as K
 import Data.Aeson.KeyMap qualified as KM
 import Data.Aeson.Types
 import Data.HashMap.Strict qualified as HashMap
+import Data.HashSet qualified as HashSet
 import Data.Hashable (hashWithSalt)
 import Data.Monoid
 import Data.Text.Extended
@@ -763,3 +766,44 @@ type AnnRedactionExpUnpreparedValue b = AnnRedactionExp b (UnpreparedValue b)
 type PreSetColsG b v = HashMap.HashMap (Column b) v
 
 type PreSetColsPartial b = HashMap.HashMap (Column b) (PartialSQLExp b)
+
+-- | Extract all session variables used in a PartialSQLExp
+getSessionVariablesFromPartialSQL :: PartialSQLExp backend -> HashSet.HashSet SessionVariable
+getSessionVariablesFromPartialSQL = \case
+  PSESessVar _ sessionVar -> HashSet.singleton sessionVar
+  PSESession -> HashSet.empty
+  PSESQLExp _ -> HashSet.empty
+
+-- | Extract all session variables used in an OpExpG
+getSessionVariablesFromOpExp :: (Backend backend) => OpExpG backend (PartialSQLExp backend) -> HashSet.HashSet SessionVariable
+getSessionVariablesFromOpExp = foldMap getSessionVariablesFromPartialSQL
+
+-- | Extract all session variables used in an AnnBoolExpFld
+getSessionVariablesFromAnnBoolExpFld :: (Backend backend) => AnnBoolExpFld backend (PartialSQLExp backend) -> HashSet.HashSet SessionVariable
+getSessionVariablesFromAnnBoolExpFld = \case
+  AVColumn _ _ opExps -> foldMap getSessionVariablesFromOpExp opExps
+  AVNestedObject _ boolExp -> getSessionVariablesFromBoolExp boolExp
+  AVRelationship _ (RelationshipFilters tablePerms annBoolExp) -> 
+    getSessionVariablesFromBoolExp annBoolExp <> getSessionVariablesFromBoolExp tablePerms
+  AVComputedField (AnnComputedFieldBoolExp _ _ _ _ cfBoolExp) -> 
+    case cfBoolExp of
+      CFBEScalar _ opExps -> foldMap getSessionVariablesFromOpExp opExps
+      CFBETable _ boolExp -> getSessionVariablesFromBoolExp boolExp
+  AVRemoteRelationship (RemoteRelPermBoolExp _ _ _) ->
+    -- Remote relationships may have their own session variable usage
+    HashSet.empty -- For now, we don't track session vars in remote relationships
+  AVAggregationPredicates {} -> HashSet.empty
+
+-- | Extract all session variables used in a GBoolExp (generic boolean expression)
+getSessionVariablesFromBoolExp :: (Backend backend) => GBoolExp backend (AnnBoolExpFld backend (PartialSQLExp backend)) -> HashSet.HashSet SessionVariable
+getSessionVariablesFromBoolExp = \case
+  BoolAnd exps -> foldMap getSessionVariablesFromBoolExp exps
+  BoolOr exps -> foldMap getSessionVariablesFromBoolExp exps
+  BoolNot boolExp -> getSessionVariablesFromBoolExp boolExp
+  BoolExists (GExists _ boolExp) -> getSessionVariablesFromBoolExp boolExp
+  BoolField fld -> getSessionVariablesFromAnnBoolExpFld fld
+
+-- | Extract all session variables from an AnnBoolExpPartialSQL
+-- This is typically what we'll use for permission boolean expressions
+getSessionVariablesFromAnnBoolExpPartialSQL :: (Backend backend) => AnnBoolExpPartialSQL backend -> HashSet.HashSet SessionVariable
+getSessionVariablesFromAnnBoolExpPartialSQL = getSessionVariablesFromBoolExp

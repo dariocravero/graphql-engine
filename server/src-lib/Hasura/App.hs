@@ -93,6 +93,8 @@ import Hasura.Authentication.User (ExtraUserInfo (..), UserInfo (..))
 import Hasura.Backends.MSSQL.Connection
 import Hasura.Backends.Postgres.Connection
 import Hasura.Base.Error
+import Hasura.Cache (initializeCache, lookupQuery, storeQuery, CacheResult (..))
+import qualified Data.HashSet as HashSet
 import Hasura.ClientCredentials (getEEClientCredentialsTx, setEEClientCredentialsTx)
 import Hasura.Eventing.Backend
 import Hasura.Eventing.Common
@@ -113,6 +115,7 @@ import Hasura.GraphQL.Transport.HTTP
     MonadExecuteQuery (..),
   )
 import Hasura.GraphQL.Transport.HTTP.Protocol (toParsed)
+import Hasura.GraphQL.Transport.HTTP (ResponseCacher(..), CacheStoreResponse(..))
 import Hasura.GraphQL.Transport.WSServerApp qualified as WS
 import Hasura.GraphQL.Transport.WebSocket.Server qualified as WS
 import Hasura.GraphQL.Transport.WebSocket.Types (WSServerEnv (..))
@@ -463,6 +466,9 @@ initialiseAppEnv env BasicConnectionInfo {..} serveOptions@ServeOptions {..} liv
   -- Generate event's trigger shared state
   lockedEventsCtx <- liftIO $ initLockedEventsCtx
 
+  -- Initialize cache if Redis URL is configured
+  maybeCache <- lift $ initializeCache env
+
   pure
     ( AppInit
         { aiTLSAllowListRef = tlsAllowListRef,
@@ -505,7 +511,8 @@ initialiseAppEnv env BasicConnectionInfo {..} serveOptions@ServeOptions {..} liv
           appEnvPersistedQueries = soPersistedQueries,
           appEnvPersistedQueriesTtl = soPersistedQueriesTtl,
           appEnvPreserve401Errors = soPreserve401Errors,
-          appServerTimeout = soServerTimeout
+          appServerTimeout = soServerTimeout,
+          appEnvCache = either (const Nothing) id maybeCache
         }
     )
 
@@ -731,7 +738,32 @@ instance HttpLog AppM where
       $ mkHttpAccessLogContext userInfoM loggingSettings reqId waiReq reqBody (BL.length response) compressedResponse qTime cType headers rb batchQueryOpLogs
 
 instance MonadExecuteQuery AppM where
-  cacheLookup _ _ _ _ _ _ = pure $ Right ([], ResponseUncached Nothing)
+  cacheLookup _executionPlan _asts cachedDirective reqParsed userInfo reqHeaders = do
+    maybeCache <- asks appEnvCache
+    case (maybeCache, cachedDirective) of
+      -- No cache configured or no @cached directive - don't cache
+      (Nothing, _) -> pure $ Right ([], ResponseUncached Nothing)
+      (_, Nothing) -> pure $ Right ([], ResponseUncached Nothing)
+      -- Cache configured and @cached directive present
+      (Just cache, Just _directive) -> do
+        -- TODO: Extract session variables used in permissions from the execution plan
+        -- For now, we pass an empty set which means all session variables will be used
+        let usedSessionVars = HashSet.empty
+        result <- lookupQuery cache reqParsed userInfo usedSessionVars reqHeaders
+        case result of
+          CacheHit cachedData -> 
+            pure $ Right ([], ResponseCached cachedData)
+          CacheMiss -> do
+            -- Return uncached with a cacher function
+            let cacher = ResponseCacher $ \response -> do
+                  storeResult <- storeQuery cache reqParsed userInfo usedSessionVars reqHeaders response
+                  case storeResult of
+                    Left err -> pure $ Left $ err500 Unexpected err
+                    Right () -> pure $ Right CacheStoreSuccess
+            pure $ Right ([], ResponseUncached (Just cacher))
+          CacheError _err -> 
+            -- Log error but continue without cache
+            pure $ Right ([], ResponseUncached Nothing)
 
 instance UserAuthentication AppM where
   resolveUserInfo logger manager headers authMode reqs =
