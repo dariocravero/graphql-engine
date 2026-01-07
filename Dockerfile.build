@@ -1,0 +1,34 @@
+# Stage 1: Build environment with GHC 9.10 and system dependencies
+FROM haskell:9.10.2 AS builder
+
+# Install system dependencies needed for building graphql-engine
+RUN apt-get update && apt-get install -y \
+    libpq-dev \
+    libkrb5-dev \
+    libnuma-dev \
+    unixodbc-dev \
+    libssl-dev \
+    pkg-config \
+    zlib1g-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /src
+
+# Copy everything (cabal.project references many paths)
+COPY . .
+
+# Update package index and build with optimizations
+RUN cabal update && cd server && cabal build exe:graphql-engine -O2 -j4
+
+# Find and copy the binary
+RUN cp $(find dist-newstyle -name graphql-engine -type f -executable | head -1) /graphql-engine && \
+    strip /graphql-engine
+
+# Stage 2: Production image
+FROM hasura/graphql-engine:v2.48.9
+
+# Replace the binary with our custom build
+COPY --from=builder /graphql-engine /bin/graphql-engine
+
+# Default command (inherited but explicit)
+CMD ["graphql-engine", "serve"]
