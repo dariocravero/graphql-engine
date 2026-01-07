@@ -184,6 +184,7 @@ mkServeOptions sor@ServeOptionsRaw {..} = do
   soEnableAllowList <- withOptionSwitch' rsoEnableAllowList (isAllowListEnabled, bool AllowListDisabled AllowListEnabled) enableAllowlistOption
   soEnabledLogTypes <- withOptionDefault rsoEnabledLogTypes (enabledLogsOption @impl)
   soLogLevel <- withOptionDefault rsoLogLevel logLevelOption
+  soRedactedLogFields <- withOptionDefault rsoRedactedLogFields redactedLogFieldsOption
   soDevMode <- withOptionSwitch' rsoDevMode (isDevModeEnabled, bool DevModeDisabled DevModeEnabled) graphqlDevModeOption
   soAdminInternalErrors <- withOptionDefault rsoAdminInternalErrors graphqlAdminInternalErrorsOption
   soEventsHttpPoolSize <- withOptionDefault rsoEventsHttpPoolSize graphqlEventsHttpPoolSizeOption

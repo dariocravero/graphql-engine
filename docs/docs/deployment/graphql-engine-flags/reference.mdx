@@ -762,6 +762,24 @@ This variable sets the level for [Hasura's logs](/deployment/logging.mdx#logging
 | **Default**         | `info`                                                                  |
 | **Supported in**    | **CE**, **Enterprise Edition**<br/>**Cloud**: can only be set to `info` |
 
+### Redacted Log Fields {#redacted-log-fields}
+
+A JSON array of field names whose values should be redacted from all log output. This is useful for preventing
+sensitive data like passwords, tokens, and API keys from appearing in logs. See
+[Log Redaction](/deployment/logging.mdx#log-redaction) for more details.
+
+Field matching is case-insensitive and ignores underscores/hyphens (e.g., `password` matches `Password`, `pass_word`,
+`PASS-WORD`).
+
+|                     |                                                                                     |
+| ------------------- | ----------------------------------------------------------------------------------- |
+| **Flag**            | `--redacted-log-fields <JSON_ARRAY>`                                                |
+| **Env var**         | `HASURA_GRAPHQL_REDACTED_LOG_FIELDS`                                                |
+| **Accepted values** | JSON array of strings                                                               |
+| **Example**         | `["password", "token", "secret", "api_key"]`                                        |
+| **Default**         | `[]` (no redaction)                                                                 |
+| **Supported in**    | CE, Enterprise Edition, Cloud                                                       |
+
 ### Max Cache Size
 
 The [maximum cache size](/caching/enterprise-caching.mdx), measured in MB, for queries.

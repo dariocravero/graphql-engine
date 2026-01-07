@@ -44,6 +44,7 @@ module Hasura.Server.Init.Arg.Command.Serve
     enableAllowlistOption,
     enabledLogsOption,
     logLevelOption,
+    redactedLogFieldsOption,
     graphqlDevModeOption,
     graphqlAdminInternalErrorsOption,
     graphqlEventsHttpPoolSizeOption,
@@ -94,6 +95,7 @@ import Hasura.Backends.Postgres.Connection.MonadTx qualified as MonadTx
 import Hasura.Cache.Bounded qualified as Bounded
 import Hasura.GraphQL.Execute.Subscription.Options qualified as Subscription.Options
 import Hasura.Logging qualified as Logging
+import Hasura.Logging.Redaction qualified as Redaction
 import Hasura.NativeQuery.Validation qualified as NativeQuery
 import Hasura.Prelude
 import Hasura.RQL.Types.Metadata (MetadataDefaults, emptyMetadataDefaults)
@@ -145,6 +147,7 @@ serveCommandParser =
     <*> parseEnableAllowlist
     <*> parseEnabledLogs
     <*> parseLogLevel
+    <*> parseRedactedLogFields
     <* parsePlanCacheSize -- parsed (for backwards compatibility reasons) but ignored
     <*> parseGraphqlDevMode
     <*> parseGraphqlAdminInternalErrors
@@ -866,6 +869,26 @@ logLevelOption =
     { Config._default = Logging.LevelInfo,
       Config._envVar = "HASURA_GRAPHQL_LOG_LEVEL",
       Config._helpMessage = "Server log level (default: info) (all: error, warn, info, debug)"
+    }
+
+parseRedactedLogFields :: Opt.Parser (Maybe Redaction.RedactedLogFields)
+parseRedactedLogFields =
+  Opt.optional
+    $ Opt.option
+      (Opt.eitherReader Env.fromEnv)
+      ( Opt.long "redacted-log-fields"
+          <> Opt.metavar "<JSON_ARRAY>"
+          <> Opt.help (Config._helpMessage redactedLogFieldsOption)
+      )
+
+redactedLogFieldsOption :: Config.Option Redaction.RedactedLogFields
+redactedLogFieldsOption =
+  Config.Option
+    { Config._default = Redaction.RedactedLogFields [],
+      Config._envVar = "HASURA_GRAPHQL_REDACTED_LOG_FIELDS",
+      Config._helpMessage =
+        "JSON array of field names to redact from logs (e.g., [\"password\", \"token\"]). "
+          <> "Matching is case-insensitive and ignores underscores/hyphens."
     }
 
 parsePlanCacheSize :: Opt.Parser (Maybe Bounded.CacheSize)

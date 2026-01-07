@@ -93,6 +93,7 @@ import Hasura.Backends.Postgres.Connection.MonadTx qualified as MonadTx
 import Hasura.Base.Error (IncludeInternalErrors (..))
 import Hasura.GraphQL.Execute.Subscription.Options qualified as Subscription.Options
 import Hasura.Logging qualified as Logging
+import Hasura.Logging.Redaction qualified as Redaction
 import Hasura.NativeQuery.Validation qualified as NativeQuery.Validation
 import Hasura.Prelude
 import Hasura.RQL.Types.Common qualified as Common
@@ -306,6 +307,7 @@ data ServeOptionsRaw impl = ServeOptionsRaw
     rsoEnableAllowList :: AllowListStatus,
     rsoEnabledLogTypes :: Maybe (HashSet (Logging.EngineLogType impl)),
     rsoLogLevel :: Maybe Logging.LogLevel,
+    rsoRedactedLogFields :: Maybe Redaction.RedactedLogFields,
     rsoDevMode :: DevModeStatus,
     rsoAdminInternalErrors :: Maybe AdminInternalErrorsStatus,
     rsoEventsHttpPoolSize :: Maybe (Refined Positive Int),
@@ -633,6 +635,7 @@ data ServeOptions impl = ServeOptions
     soEnableAllowList :: AllowListStatus,
     soEnabledLogTypes :: HashSet (Logging.EngineLogType impl),
     soLogLevel :: Logging.LogLevel,
+    soRedactedLogFields :: Redaction.RedactedLogFields,
     soEventsHttpPoolSize :: Refined Positive Int,
     soEventsFetchInterval :: Refined NonNegative Milliseconds,
     soAsyncActionsFetchInterval :: OptionalInterval,

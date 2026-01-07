@@ -144,7 +144,7 @@ runApp env (HGEOptions rci metadataDbUrl hgeCmd) = do
       liftIO $ runExceptT $ PG.runTx minimalPool (PG.ReadCommitted, Nothing) tx
 
     mkMinimalPool connInfo = do
-      pgLogger <- _lsPgLogger <$> mkLoggers defaultEnabledEngineLogTypes LevelInfo
+      pgLogger <- _lsPgLogger <$> mkLoggers defaultEnabledEngineLogTypes LevelInfo mempty
       let connParams = PG.defaultConnParams {PG.cpConns = 1}
       liftIO $ PG.initPGPool connInfo J.Null connParams pgLogger
 

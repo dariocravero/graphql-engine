@@ -670,6 +670,7 @@ library
                      , Hasura.CredentialCache
                      , Hasura.CachedTime
                      , Hasura.Logging
+                     , Hasura.Logging.Redaction
                      , Hasura.HTTP
                      , Hasura.PingSources
 

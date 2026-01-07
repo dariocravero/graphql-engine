@@ -36,6 +36,7 @@ import Hasura.Backends.Postgres.Connection.MonadTx qualified as MonadTx
 import Hasura.Cache.Bounded qualified as Cache
 import Hasura.GraphQL.Execute.Subscription.Options qualified as Subscription.Options
 import Hasura.Logging qualified as Logging
+import Hasura.Logging.Redaction qualified as Redaction
 import Hasura.NativeQuery.Validation qualified as NativeQuery
 import Hasura.Prelude
 import Hasura.RQL.Types.Metadata (Metadata, MetadataDefaults (..))
@@ -243,6 +244,9 @@ instance FromEnv MetadataDefaults where
   fromEnv = J.eitherDecode . BLU.fromString
 
 instance FromEnv Metadata where
+  fromEnv = J.eitherDecode . BLU.fromString
+
+instance FromEnv Redaction.RedactedLogFields where
   fromEnv = J.eitherDecode . BLU.fromString
 
 instance FromEnv Options.StringifyNumbers where
