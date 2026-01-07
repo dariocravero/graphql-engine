@@ -354,14 +354,14 @@ impl HttpHeadersPreset {
         let forward = headers_preset
             .forward
             .iter()
-            .map(|header| SerializableHeaderName::new(header.to_string()).map_err(to_error))
+            .map(|header| SerializableHeaderName::new(header.clone()).map_err(to_error))
             .collect::<Result<Vec<_>, DataConnectorError>>()?;
 
         let additional = headers_preset
             .additional
             .iter()
             .map(|(header_name, header_val)| {
-                let key = SerializableHeaderName::new(header_name.to_string()).map_err(to_error)?;
+                let key = SerializableHeaderName::new(header_name.clone()).map_err(to_error)?;
                 let val = resolve_value_expression(&metadata_accessor.flags, header_val.clone());
                 Ok((key, val))
             })
@@ -401,7 +401,7 @@ impl CommandsResponseConfig {
         let forward_headers = response_headers
             .forward_headers
             .iter()
-            .map(|header| SerializableHeaderName::new(header.to_string()).map_err(to_error))
+            .map(|header| SerializableHeaderName::new(header.clone()).map_err(to_error))
             .collect::<Result<Vec<_>, DataConnectorError>>()?;
         Ok(Self {
             headers_field: response_headers.headers_field.clone(),
@@ -557,6 +557,10 @@ pub struct DataConnectorRelationalQueryCapabilities {
     #[serde(default = "serde_ext::ser_default")]
     #[serde(skip_serializing_if = "serde_ext::is_ser_default")]
     pub supports_union: bool,
+
+    #[serde(default = "serde_ext::ser_default")]
+    #[serde(skip_serializing_if = "serde_ext::is_ser_default")]
+    pub supports_streaming: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -647,13 +651,6 @@ pub struct DataConnectorRelationalScalarTypeCapabilities {
     #[serde(skip_serializing_if = "serde_ext::is_ser_default")]
     pub supports_interval: bool,
 
-    #[serde(default = "serde_ext::ser_default")]
-    #[serde(skip_serializing_if = "serde_ext::is_ser_default")]
-    pub supports_from_type: bool,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
-pub struct DataConnectorRelationalCastCapabilities {
     #[serde(default = "serde_ext::ser_default")]
     #[serde(skip_serializing_if = "serde_ext::is_ser_default")]
     pub supports_from_type: bool,
@@ -960,6 +957,42 @@ pub struct DataConnectorRelationalScalarExpressionCapabilities {
     #[serde(default = "serde_ext::ser_default")]
     #[serde(skip_serializing_if = "serde_ext::is_ser_default")]
     pub supports_plus: bool,
+
+    #[serde(default = "serde_ext::ser_default")]
+    #[serde(skip_serializing_if = "serde_ext::is_ser_default")]
+    pub supports_json_contains: bool,
+
+    #[serde(default = "serde_ext::ser_default")]
+    #[serde(skip_serializing_if = "serde_ext::is_ser_default")]
+    pub supports_json_get: bool,
+
+    #[serde(default = "serde_ext::ser_default")]
+    #[serde(skip_serializing_if = "serde_ext::is_ser_default")]
+    pub supports_json_get_str: bool,
+
+    #[serde(default = "serde_ext::ser_default")]
+    #[serde(skip_serializing_if = "serde_ext::is_ser_default")]
+    pub supports_json_get_int: bool,
+
+    #[serde(default = "serde_ext::ser_default")]
+    #[serde(skip_serializing_if = "serde_ext::is_ser_default")]
+    pub supports_json_get_float: bool,
+
+    #[serde(default = "serde_ext::ser_default")]
+    #[serde(skip_serializing_if = "serde_ext::is_ser_default")]
+    pub supports_json_get_bool: bool,
+
+    #[serde(default = "serde_ext::ser_default")]
+    #[serde(skip_serializing_if = "serde_ext::is_ser_default")]
+    pub supports_json_get_json: bool,
+
+    #[serde(default = "serde_ext::ser_default")]
+    #[serde(skip_serializing_if = "serde_ext::is_ser_default")]
+    pub supports_json_as_text: bool,
+
+    #[serde(default = "serde_ext::ser_default")]
+    #[serde(skip_serializing_if = "serde_ext::is_ser_default")]
+    pub supports_json_length: bool,
 }
 
 #[allow(clippy::struct_excessive_bools)]
@@ -1257,6 +1290,7 @@ fn mk_ndc_02_capabilities(
         }),
         supports_relational_queries: capabilities.relational_query.as_ref().map(|r| {
             DataConnectorRelationalQueryCapabilities {
+                supports_streaming: r.streaming.is_some(),
                 supports_project: DataConnectorRelationalProjectionCapabilities {
                     expression_capabilities: mk_relational_expression_capabilities(
                         &r.project.expression,
@@ -1418,6 +1452,15 @@ fn mk_relational_expression_capabilities(
             supports_not: capabilities.scalar.not.is_some(),
             supports_or: capabilities.scalar.or.is_some(),
             supports_plus: capabilities.scalar.plus.is_some(),
+            supports_json_contains: capabilities.scalar.json_contains.is_some(),
+            supports_json_get: capabilities.scalar.json_get.is_some(),
+            supports_json_get_str: capabilities.scalar.json_get_str.is_some(),
+            supports_json_get_int: capabilities.scalar.json_get_int.is_some(),
+            supports_json_get_float: capabilities.scalar.json_get_float.is_some(),
+            supports_json_get_bool: capabilities.scalar.json_get_bool.is_some(),
+            supports_json_get_json: capabilities.scalar.json_get_json.is_some(),
+            supports_json_as_text: capabilities.scalar.json_as_text.is_some(),
+            supports_json_length: capabilities.scalar.json_length.is_some(),
         },
         supports_aggregate: DataConnectorRelationalAggregateExpressionCapabilities {
             supports_bool_and: capabilities.aggregate.bool_and.is_some(),

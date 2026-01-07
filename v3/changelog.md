@@ -8,6 +8,92 @@
 
 ### Fixed
 
+## [v2026.01.07]
+
+### Added
+
+- Updated Azure LLM configuration to support client-secret authentication.
+
+Client-secret authentication is an alternative to API key authentication. It
+requires setting a tenant ID, client ID, and client secret in the configuration.
+For example:
+
+```yaml
+kind: PromptQlConfig
+version: v2
+definition:
+  llm:
+    provider: azure
+    endpoint: "https://jessehallett-2555-resource.cognitiveservices.azure.com/openai/deployments/gpt-5.1-chat"
+    clientId:
+      value: 23f55411-d226-4c8b-928d-1376a788dec3
+    clientSecret:
+      value: <redacted>
+    tenantId:
+      value: 24b7b3cd-ce05-4a20-b1c8-472f8ad2edbf
+```
+
+### Changed
+
+### Fixed
+
+## [v2025.12.22]
+
+### Changed
+
+- Webhook responses preserve original HTTP status code
+
+## [v2025.11.26]
+
+- No changes
+
+## [v2025.11.24]
+
+- No changes
+
+## [v2025.11.17]
+
+- No changes
+
+## [v2025.11.10]
+
+### Changed
+
+- `pre/post-ndc-request` plugins enabled for Relational API
+
+## [v2025.11.07]
+
+- No changes
+
+## [v2025.10.28]
+
+- No changes
+
+## [v2025.10.20]
+
+- No changes
+
+## [v2025.10.09]
+
+- No changes
+
+## [v2025.10.03]
+
+- No changes
+
+## [v2025.09.22]
+
+### Added
+
+- Added `contextWindowLimit` to `PromptQlConfigV2` to allow configuring the
+  maximum number of tokens to be used for the context window for threads.
+
+### Fixed
+
+- Headers returned from commands were not being being returned when the command
+  was the source of a remote relationship, now they are returned correctly. As
+  before, no headers are returned from the target of a remote relationship.
+
 ## [v2025.09.05]
 
 ### Changed
@@ -2000,7 +2086,18 @@ Initial release.
 
 <!-- end -->
 
-[Unreleased]: https://github.com/hasura/v3-engine/compare/v2025.09.05...HEAD
+[Unreleased]: https://github.com/hasura/v3-engine/compare/v2026.01.07...HEAD
+[v2025.12.22]: https://github.com/hasura/v3-engine/releases/tag/v2025.12.22
+[v2025.11.26]: https://github.com/hasura/v3-engine/releases/tag/v2025.11.26
+[v2025.11.24]: https://github.com/hasura/v3-engine/releases/tag/v2025.11.24
+[v2025.11.17]: https://github.com/hasura/v3-engine/releases/tag/v2025.11.17
+[v2025.11.10]: https://github.com/hasura/v3-engine/releases/tag/v2025.11.10
+[v2025.11.07]: https://github.com/hasura/v3-engine/releases/tag/v2025.11.07
+[v2025.10.28]: https://github.com/hasura/v3-engine/releases/tag/v2025.10.28
+[v2025.10.20]: https://github.com/hasura/v3-engine/releases/tag/v2025.10.20
+[v2025.10.09]: https://github.com/hasura/v3-engine/releases/tag/v2025.10.09
+[v2025.10.03]: https://github.com/hasura/v3-engine/releases/tag/v2025.10.03
+[v2025.09.22]: https://github.com/hasura/v3-engine/releases/tag/v2025.09.22
 [v2025.09.05]: https://github.com/hasura/v3-engine/releases/tag/v2025.09.05
 [v2025.08.27]: https://github.com/hasura/v3-engine/releases/tag/v2025.08.27
 [v2025.08.26]: https://github.com/hasura/v3-engine/releases/tag/v2025.08.26
@@ -2044,7 +2141,6 @@ Initial release.
 [v2025.01.09]: https://github.com/hasura/v3-engine/releases/tag/v2025.01.09
 [v2025.01.06]: https://github.com/hasura/v3-engine/releases/tag/v2025.01.06
 [v2024.12.17]: https://github.com/hasura/v3-engine/releases/tag/v2024.12.17
-[v2024.12.03]: https://github.com/hasura/v3-engine/releases/tag/v2024.12.03
 [v2024.11.25]: https://github.com/hasura/v3-engine/releases/tag/v2024.11.25
 [v2024.11.18]: https://github.com/hasura/v3-engine/releases/tag/v2024.11.18
 [v2024.11.13]: https://github.com/hasura/v3-engine/releases/tag/v2024.11.13

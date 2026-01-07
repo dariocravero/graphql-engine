@@ -31,14 +31,11 @@ use std::sync::Arc;
 
 pub type Result<A> = std::result::Result<A, (StatusCode, Json<ndc_models::ErrorResponse>)>;
 
-#[allow(clippy::print_stdout)]
-pub async fn execute_relational_query(
-    state: &AppState,
+async fn create_physical_plan(
     query: &RelationalQuery,
-) -> Result<Vec<Vec<serde_json::Value>>> {
-    println!("[SELECT]: query={query:?}");
-
-    let logical_plan: datafusion::logical_expr::LogicalPlan =
+    state: &AppState,
+) -> Result<Arc<dyn datafusion::physical_plan::ExecutionPlan>> {
+    let logical_plan =
         convert_relation_to_logical_plan(&query.root_relation, state).map_err(|err| {
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -49,16 +46,13 @@ pub async fn execute_relational_query(
             )
         })?;
 
-    let state = SessionStateBuilder::new()
+    let session_state = SessionStateBuilder::new()
         .with_config(SessionConfig::new())
         .with_runtime_env(Arc::new(RuntimeEnv::default()))
         .with_default_features()
         .build();
 
-    let session_ctx = SessionContext::new();
-    let task_ctx = session_ctx.task_ctx();
-
-    let physical_plan = state
+    session_state
         .create_physical_plan(&logical_plan)
         .await
         .map_err(|err| {
@@ -69,7 +63,20 @@ pub async fn execute_relational_query(
                     details: serde_json::Value::Null,
                 }),
             )
-        })?;
+        })
+}
+
+#[allow(clippy::print_stdout)]
+pub async fn execute_relational_query(
+    state: &AppState,
+    query: &RelationalQuery,
+) -> Result<Vec<Vec<serde_json::Value>>> {
+    println!("[SELECT]: query={query:?}");
+
+    let physical_plan = create_physical_plan(query, state).await?;
+
+    let session_ctx = SessionContext::new();
+    let task_ctx = session_ctx.task_ctx();
 
     let results = datafusion::physical_plan::collect(physical_plan, task_ctx)
         .await
@@ -83,7 +90,6 @@ pub async fn execute_relational_query(
             )
         })?;
 
-    // unimplemented: stream the records back
     let mut rows: Vec<Vec<serde_json::Value>> = vec![];
 
     for batch in results {
@@ -105,6 +111,61 @@ pub async fn execute_relational_query(
     }
 
     Ok(rows)
+}
+
+#[allow(clippy::print_stdout)]
+pub async fn execute_relational_query_stream(
+    state: &AppState,
+    request: &RelationalQuery,
+) -> Result<impl futures::Stream<Item = std::result::Result<String, std::io::Error>> + use<>> {
+    use futures::{StreamExt, TryStreamExt};
+
+    println!("[SELECT STREAM]: query={request:?}");
+
+    let physical_plan = create_physical_plan(request, state).await?;
+
+    let session_ctx = SessionContext::new();
+    let task_ctx = session_ctx.task_ctx();
+
+    let stream =
+        datafusion::physical_plan::execute_stream(physical_plan, task_ctx).map_err(|err| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ndc_models::ErrorResponse {
+                    message: err.to_string(),
+                    details: serde_json::Value::Null,
+                }),
+            )
+        })?;
+
+    let row_stream = stream
+        .map_err(|err| std::io::Error::other(err.to_string()))
+        .map(move |batch_result| {
+            let batch = batch_result?;
+            let schema = batch.schema();
+
+            let new_rows =
+                from_record_batch::<Vec<serde_json::Map<String, serde_json::Value>>>(&batch)
+                    .map_err(|err| std::io::Error::other(err.to_string()))?;
+
+            let rows: std::result::Result<Vec<_>, std::io::Error> = new_rows
+                .into_iter()
+                .map(|new_row| {
+                    let row = convert_fields_object_to_row_vec(schema.fields(), &new_row)
+                        .map_err(|_| std::io::Error::other("conversion error"))?;
+
+                    let json_line = serde_json::to_string(&row)
+                        .map_err(|e| std::io::Error::other(e.to_string()))?;
+
+                    Ok(format!("{json_line}\n"))
+                })
+                .collect();
+
+            Ok::<_, std::io::Error>(futures::stream::iter(rows?.into_iter().map(Ok)))
+        })
+        .try_flatten();
+
+    Ok(row_stream)
 }
 
 fn convert_fields_object_to_row_vec(
@@ -187,7 +248,7 @@ fn convert_relation_to_logical_plan(
                     table_schema
                         .as_ref()
                         .index_of(column.as_str())
-                        .map_err(|e| DataFusionError::ArrowError(e, None))
+                        .map_err(|e| DataFusionError::ArrowError(Box::new(e), None))
                 })
                 .collect::<datafusion::error::Result<Vec<_>>>()?;
 
@@ -226,7 +287,8 @@ fn convert_relation_to_logical_plan(
             let mut schema_builder = SchemaBuilder::new();
 
             for (i, expr) in exprs.iter().enumerate() {
-                let name = format!("column_{i}");
+                // add a random number to the column name to avoid collisions
+                let name = format!("column_{i}_{rand}", rand = rand::random::<u32>());
                 let logical_expr: datafusion::logical_expr::Expr =
                     convert_expression_to_logical_expr(expr, input_plan.schema())?;
 
@@ -326,7 +388,7 @@ fn convert_relation_to_logical_plan(
                     join_type,
                     join_constraint: datafusion::common::JoinConstraint::On,
                     schema: Arc::new(join_schema),
-                    null_equals_null: false,
+                    null_equality: datafusion::common::NullEquality::NullEqualsNothing,
                 });
             Ok(logical_plan)
         }
@@ -372,9 +434,12 @@ fn convert_relation_to_logical_plan(
                 .iter()
                 .map(|relation| Ok(Arc::new(convert_relation_to_logical_plan(relation, state)?)))
                 .collect::<datafusion::error::Result<Vec<_>>>()?;
-            let union_plan = datafusion::logical_expr::LogicalPlan::Union(
-                datafusion::logical_expr::Union::try_new_by_name(input_plans)?,
-            );
+            let schema = input_plans[0].schema().as_ref().clone();
+            let union_plan =
+                datafusion::logical_expr::LogicalPlan::Union(datafusion::logical_expr::Union {
+                    inputs: input_plans,
+                    schema: Arc::new(schema),
+                });
             Ok(union_plan)
         }
     }
@@ -583,8 +648,9 @@ fn get_table_provider(
     }
 
     let schema = schema_builder.finish();
-    let records = serde_arrow::to_record_batch(schema.fields(), &rows)
-        .map_err(|e| DataFusionError::Internal(e.to_string()))?;
+    let records =
+        serde_arrow::to_record_batch(&schema.fields().iter().cloned().collect::<Vec<_>>(), &rows)
+            .map_err(|e| DataFusionError::Internal(e.to_string()))?;
 
     let mem_table = MemTable::try_new(Arc::new(schema), vec![vec![records]])?;
 
@@ -968,7 +1034,7 @@ fn convert_expression_to_logical_expr(
         RelationalExpression::GetField { column, field } => Ok(get_field(
             convert_expression_to_logical_expr(column, schema)?,
             convert_literal_to_logical_expr(&RelationalLiteral::String {
-                value: field.to_string(),
+                value: field.clone(),
             }),
         )),
         RelationalExpression::Greatest { exprs } => Ok(greatest(
@@ -1161,7 +1227,7 @@ fn convert_expression_to_logical_expr(
                         args: vec![convert_expression_to_logical_expr(expr, schema)?],
                         distinct: false,
                         filter: None,
-                        order_by: None,
+                        order_by: vec![],
                         null_treatment: None,
                     },
                 },
@@ -1177,7 +1243,7 @@ fn convert_expression_to_logical_expr(
                         args: vec![convert_expression_to_logical_expr(expr, schema)?],
                         distinct: *distinct,
                         filter: None,
-                        order_by: None,
+                        order_by: vec![],
                         null_treatment: None,
                     },
                 },
@@ -1192,7 +1258,7 @@ fn convert_expression_to_logical_expr(
                     args: vec![convert_expression_to_logical_expr(expr, schema)?],
                     distinct: false,
                     filter: None,
-                    order_by: None,
+                    order_by: vec![],
                     null_treatment: None,
                 },
             },
@@ -1205,20 +1271,20 @@ fn convert_expression_to_logical_expr(
                     args: vec![convert_expression_to_logical_expr(expr, schema)?],
                     distinct: false,
                     filter: None,
-                    order_by: None,
+                    order_by: vec![],
                     null_treatment: None,
                 },
             },
         )),
         RelationalExpression::StringAgg { expr, separator, distinct, order_by } => {
-            let order_by = order_by.as_ref()
-                .map(|order_by| {
-                    order_by
-                        .iter()
-                        .map(|s| convert_sort_to_logical_sort(s, schema))
-                        .collect::<datafusion::error::Result<Vec<_>>>()
-                })
-                .transpose()?;
+            let order_by = if let Some(order_by) = order_by.as_ref() {
+                order_by
+                    .iter()
+                    .map(|s| convert_sort_to_logical_sort(s, schema))
+                    .collect::<datafusion::error::Result<Vec<_>>>()?
+            } else {
+                vec![]
+            };
             Ok(datafusion::prelude::Expr::AggregateFunction(
                 datafusion::logical_expr::expr::AggregateFunction {
                     func: datafusion::functions_aggregate::string_agg::string_agg_udaf(),
@@ -1239,7 +1305,7 @@ fn convert_expression_to_logical_expr(
                     args: vec![convert_expression_to_logical_expr(expr, schema)?],
                     distinct: false,
                     filter: None,
-                    order_by: None,
+                    order_by: vec![],
                     null_treatment: None,
                 },
             },
@@ -1252,7 +1318,7 @@ fn convert_expression_to_logical_expr(
                     args: vec![convert_expression_to_logical_expr(expr, schema)?],
                     distinct: false,
                     filter: None,
-                    order_by: None,
+                    order_by: vec![],
                     null_treatment: None,
                 },
             },
@@ -1264,7 +1330,7 @@ fn convert_expression_to_logical_expr(
                     args: vec![convert_expression_to_logical_expr(expr, schema)?],
                     distinct: false,
                     filter: None,
-                    order_by: None,
+                    order_by: vec![],
                     null_treatment: None,
                 },
             },
@@ -1280,7 +1346,7 @@ fn convert_expression_to_logical_expr(
                         ],
                         distinct: false,
                         filter: None,
-                        order_by: None,
+                        order_by: vec![],
                         null_treatment: None,
                     },
                 },
@@ -1294,21 +1360,21 @@ fn convert_expression_to_logical_expr(
                         args: vec![convert_expression_to_logical_expr(expr, schema)?],
                         distinct: false,
                         filter: None,
-                        order_by: None,
+                        order_by: vec![],
                         null_treatment: None,
                     },
                 },
             ))
         },
         RelationalExpression::ArrayAgg { expr, distinct, order_by } => {
-            let order_by = order_by.as_ref()
-                .map(|order_by| {
-                    order_by
-                        .iter()
-                        .map(|s| convert_sort_to_logical_sort(s, schema))
-                        .collect::<datafusion::error::Result<Vec<_>>>()
-                })
-                .transpose()?;
+            let order_by = if let Some(order_by) = order_by.as_ref() {
+                order_by
+                    .iter()
+                    .map(|s| convert_sort_to_logical_sort(s, schema))
+                    .collect::<datafusion::error::Result<Vec<_>>>()?
+            } else {
+                vec![]
+            };
             Ok(datafusion::prelude::Expr::AggregateFunction(
                 datafusion::logical_expr::expr::AggregateFunction {
                     func: datafusion::functions_aggregate::array_agg::array_agg_udaf(),
@@ -1376,6 +1442,114 @@ fn convert_expression_to_logical_expr(
             order_by: _,
             partition_by: _,
         } => unimplemented!(),
+        RelationalExpression::JsonContains { json, keys } => {
+            let mut args = vec![convert_expression_to_logical_expr(json, schema)?];
+            for key in keys {
+                args.push(convert_expression_to_logical_expr(key, schema)?);
+            }
+            Ok(datafusion::prelude::Expr::ScalarFunction(
+                datafusion::logical_expr::expr::ScalarFunction {
+                    func: datafusion_functions_json::udfs::json_contains_udf(),
+                    args,
+                },
+            ))
+        }
+        RelationalExpression::JsonGet { json, keys } => {
+            let mut args = vec![convert_expression_to_logical_expr(json, schema)?];
+            for key in keys {
+                args.push(convert_expression_to_logical_expr(key, schema)?);
+            }
+            Ok(datafusion::prelude::Expr::ScalarFunction(
+                datafusion::logical_expr::expr::ScalarFunction {
+                    func: datafusion_functions_json::udfs::json_get_udf(),
+                    args,
+                },
+            ))
+        }
+        RelationalExpression::JsonGetStr { json, keys } => {
+            let mut args = vec![convert_expression_to_logical_expr(json, schema)?];
+            for key in keys {
+                args.push(convert_expression_to_logical_expr(key, schema)?);
+            }
+            Ok(datafusion::prelude::Expr::ScalarFunction(
+                datafusion::logical_expr::expr::ScalarFunction {
+                    func: datafusion_functions_json::udfs::json_get_str_udf(),
+                    args,
+                },
+            ))
+        }
+        RelationalExpression::JsonGetInt { json, keys } => {
+            let mut args = vec![convert_expression_to_logical_expr(json, schema)?];
+            for key in keys {
+                args.push(convert_expression_to_logical_expr(key, schema)?);
+            }
+            Ok(datafusion::prelude::Expr::ScalarFunction(
+                datafusion::logical_expr::expr::ScalarFunction {
+                    func: datafusion_functions_json::udfs::json_get_int_udf(),
+                    args,
+                },
+            ))
+        }
+        RelationalExpression::JsonGetFloat { json, keys } => {
+            let mut args = vec![convert_expression_to_logical_expr(json, schema)?];
+            for key in keys {
+                args.push(convert_expression_to_logical_expr(key, schema)?);
+            }
+            Ok(datafusion::prelude::Expr::ScalarFunction(
+                datafusion::logical_expr::expr::ScalarFunction {
+                    func: datafusion_functions_json::udfs::json_get_float_udf(),
+                    args,
+                },
+            ))
+        }
+        RelationalExpression::JsonGetBool { json, keys } => {
+            let mut args = vec![convert_expression_to_logical_expr(json, schema)?];
+            for key in keys {
+                args.push(convert_expression_to_logical_expr(key, schema)?);
+            }
+            Ok(datafusion::prelude::Expr::ScalarFunction(
+                datafusion::logical_expr::expr::ScalarFunction {
+                    func: datafusion_functions_json::udfs::json_get_bool_udf(),
+                    args,
+                },
+            ))
+        }
+        RelationalExpression::JsonGetJson { json, keys } => {
+            let mut args = vec![convert_expression_to_logical_expr(json, schema)?];
+            for key in keys {
+                args.push(convert_expression_to_logical_expr(key, schema)?);
+            }
+            Ok(datafusion::prelude::Expr::ScalarFunction(
+                datafusion::logical_expr::expr::ScalarFunction {
+                    func: datafusion_functions_json::udfs::json_get_json_udf(),
+                    args,
+                },
+            ))
+        }
+        RelationalExpression::JsonAsText { json, keys } => {
+            let mut args = vec![convert_expression_to_logical_expr(json, schema)?];
+            for key in keys {
+                args.push(convert_expression_to_logical_expr(key, schema)?);
+            }
+            Ok(datafusion::prelude::Expr::ScalarFunction(
+                datafusion::logical_expr::expr::ScalarFunction {
+                    func: datafusion_functions_json::udfs::json_as_text_udf(),
+                    args,
+                },
+            ))
+        }
+        RelationalExpression::JsonLength { json, keys } => {
+            let mut args = vec![convert_expression_to_logical_expr(json, schema)?];
+            for key in keys {
+                args.push(convert_expression_to_logical_expr(key, schema)?);
+            }
+            Ok(datafusion::prelude::Expr::ScalarFunction(
+                datafusion::logical_expr::expr::ScalarFunction {
+                    func: datafusion_functions_json::udfs::json_length_udf(),
+                    args,
+                },
+            ))
+        }
     }
 }
 

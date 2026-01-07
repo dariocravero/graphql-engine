@@ -6,6 +6,8 @@ use open_dds::spanned::Spanned;
 use schemars::{JsonSchema, schema::Schema::Object as SchemaObjectVariant};
 use serde::{Deserialize, Serialize};
 
+use crate::views::View;
+
 pub mod accessor;
 pub mod aggregates;
 pub mod arguments;
@@ -27,12 +29,13 @@ pub mod spanned;
 pub mod test_utils;
 pub mod traits;
 pub mod types;
+pub mod views;
 
 // In the user facing configuration, the connection string can either be a literal or a reference
 // to a secret, so we advertize either in the JSON schema. However, when building the configuration,
 // we expect the metadata build service to have resolved the secret reference so we deserialize
 // only to a literal value.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, derive_more::Display)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, derive_more::with_trait::Display)]
 pub struct EnvironmentValue {
     pub value: String,
 }
@@ -52,10 +55,10 @@ impl traits::OpenDd for EnvironmentValue {
     fn json_schema(generator: &mut schemars::r#gen::SchemaGenerator) -> schemars::schema::Schema {
         // This is copied from ndc-sdk to avoid establishing a dependency.
         let mut s = EnvironmentValueImpl::json_schema(generator);
-        if let SchemaObjectVariant(o) = &mut s {
-            if let Some(m) = &mut o.metadata {
-                m.id = Some("https://hasura.io/jsonschemas/EnvironmentValue".into());
-            }
+        if let SchemaObjectVariant(o) = &mut s
+            && let Some(m) = &mut o.metadata
+        {
+            m.id = Some("https://hasura.io/jsonschemas/EnvironmentValue".into());
         }
         s
     }
@@ -127,6 +130,10 @@ pub enum OpenDdSubgraphObject {
 
     // Plugin
     LifecyclePluginHook(Spanned<plugins::LifecyclePluginHook>),
+
+    // View
+    View(Spanned<View>),
+    ViewPermissions(Spanned<permissions::ViewPermissions>),
 }
 
 /// All of the metadata required to run Hasura v3 engine.
@@ -216,7 +223,7 @@ impl Metadata {
         }
     }
 
-    pub fn get_flags(&self) -> Cow<flags::OpenDdFlags> {
+    pub fn get_flags(&self) -> Cow<'_, flags::OpenDdFlags> {
         match self {
             Metadata::WithoutNamespaces(_) => Cow::Owned(flags::OpenDdFlags::default()),
             Metadata::Versioned(metadata) => match metadata {

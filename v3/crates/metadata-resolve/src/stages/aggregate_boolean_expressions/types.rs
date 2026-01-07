@@ -59,18 +59,6 @@ pub struct ComparableCountGraphqlConfig {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
-pub struct CustomFilterInput {
-    pub filter_boolean_expression_type: Qualified<CustomTypeName>,
-    pub order_by_expression: Qualified<OrderByExpressionName>,
-    pub graphql: Option<CustomFilterInputGraphqlConfig>,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
-pub struct CustomFilterInputGraphqlConfig {
-    pub type_name: ast::TypeName,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct AggregateBooleanExpressionGraphqlConfig {
     pub type_name: ast::TypeName,
 }
@@ -386,7 +374,7 @@ pub enum AggregateBooleanExpressionError {
     },
 }
 
-#[derive(Debug, Eq, PartialEq, Copy, Clone, derive_more::Display)]
+#[derive(Debug, Eq, PartialEq, Copy, Clone, derive_more::with_trait::Display)]
 pub enum AggregateOperandType {
     #[display("object aggregate")]
     ObjectAggregate,
@@ -394,7 +382,7 @@ pub enum AggregateOperandType {
     ScalarAggregate,
 }
 
-#[derive(Debug, Eq, PartialEq, Copy, Clone, derive_more::Display)]
+#[derive(Debug, Eq, PartialEq, Copy, Clone, derive_more::with_trait::Display)]
 pub enum NameSource {
     #[display("comparable aggregation function")]
     ComparableAggregationFunction,

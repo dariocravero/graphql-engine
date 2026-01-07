@@ -14,6 +14,7 @@ use crate::{
     spanned::Spanned,
     traits::{self, OpenDd, OpenDdDeserializeError},
     types::{CustomTypeName, FieldName, OperatorName},
+    views::ViewName,
 };
 
 #[derive(
@@ -27,7 +28,7 @@ use crate::{
     Ord,
     JsonSchema,
     Hash,
-    derive_more::Display,
+    derive_more::with_trait::Display,
     opendds_derive::OpenDd,
 )]
 pub struct Role(pub String);
@@ -1096,10 +1097,10 @@ impl traits::OpenDd for ValueExpression {
     }
     fn json_schema(generator: &mut schemars::r#gen::SchemaGenerator) -> schemars::schema::Schema {
         let mut s = ValueExpressionImpl::json_schema(generator);
-        if let schemars::schema::Schema::Object(o) = &mut s {
-            if let Some(m) = &mut o.metadata {
-                m.id = Some("https://hasura.io/jsonschemas/metadata/ValueExpression".into());
-            }
+        if let schemars::schema::Schema::Object(o) = &mut s
+            && let Some(m) = &mut o.metadata
+        {
+            m.id = Some("https://hasura.io/jsonschemas/metadata/ValueExpression".into());
         }
         s
     }
@@ -1136,12 +1137,10 @@ impl traits::OpenDd for ValueExpressionOrPredicate {
     }
     fn json_schema(generator: &mut schemars::r#gen::SchemaGenerator) -> schemars::schema::Schema {
         let mut s = ValueExpressionOrPredicateImpl::json_schema(generator);
-        if let schemars::schema::Schema::Object(o) = &mut s {
-            if let Some(m) = &mut o.metadata {
-                m.id = Some(
-                    "https://hasura.io/jsonschemas/metadata/ValueExpressionOrPredicate".into(),
-                );
-            }
+        if let schemars::schema::Schema::Object(o) = &mut s
+            && let Some(m) = &mut o.metadata
+        {
+            m.id = Some("https://hasura.io/jsonschemas/metadata/ValueExpressionOrPredicate".into());
         }
         s
     }
@@ -1186,4 +1185,48 @@ pub struct RelationalUpdatePermission {
 /// This is only applicable for data connectors that support relational operations.
 pub struct RelationalDeletePermission {
     // Empty for now, will be extended later with filter predicates and argument presets
+}
+
+#[derive(Serialize, Clone, Debug, Eq, PartialEq, opendds_derive::OpenDd)]
+#[serde(tag = "version", content = "definition")]
+#[serde(rename_all = "camelCase")]
+#[opendd(as_versioned_with_definition, json_schema(title = "ViewPermissions",))]
+/// Definition of permissions for an OpenDD view.
+pub enum ViewPermissions {
+    V1(ViewPermissionsV1),
+}
+
+#[derive(Serialize, Clone, Debug, Eq, PartialEq, opendds_derive::OpenDd)]
+#[serde(rename_all = "camelCase")]
+#[opendd(json_schema(title = "ViewPermissionsV1"))]
+/// Definition of permissions for an OpenDD view.
+pub struct ViewPermissionsV1 {
+    /// The name of the view for which permissions are being defined.
+    pub view_name: ViewName,
+    /// View permissions definitions
+    pub permissions: ViewPermissionOperand,
+}
+
+/// Configuration for view permissions
+#[derive(Serialize, Clone, Debug, PartialEq, Eq, opendds_derive::OpenDd)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[opendd(externally_tagged, json_schema(title = "ViewPermissionOperand"))]
+pub enum ViewPermissionOperand {
+    /// Definition of role-based view permissions on an OpenDD view
+    #[opendd(json_schema(title = "RoleBased"))]
+    RoleBased(Vec<ViewPermission>),
+    /// Definition of rules-based view permissions on an OpenDD view
+    #[opendd(json_schema(title = "RulesBased"))]
+    RulesBased(Vec<authorization::ViewAuthorizationRule>),
+}
+
+#[derive(Serialize, Clone, Debug, Eq, PartialEq, opendds_derive::OpenDd)]
+#[serde(rename_all = "camelCase")]
+#[opendd(json_schema(title = "ViewPermission"))]
+/// Defines the permissions for a view for a role.
+pub struct ViewPermission {
+    /// The role for which permissions are being defined.
+    pub role: Role,
+    /// Whether access is allowed or denied for this role.
+    pub allow: bool,
 }

@@ -3,6 +3,7 @@ use authorization_rules::{
     ArgumentPolicy, ConditionCache, ModelPermission, ObjectInputPolicy,
     evaluate_command_authorization_rules, evaluate_field_authorization_rules,
     evaluate_model_authorization_rules, evaluate_type_input_authorization_rules,
+    evaluate_view_authorization_rules,
 };
 use hasura_authn_core::SessionVariables;
 use indexmap::IndexMap;
@@ -16,6 +17,7 @@ use open_dds::{
     query::ArgumentName,
     relationships::RelationshipName,
     types::{CustomTypeName, FieldName},
+    views::ViewName,
 };
 use std::collections::BTreeMap;
 
@@ -30,7 +32,7 @@ pub struct OutputObjectTypeView<'metadata> {
 }
 
 impl OutputObjectTypeView<'_> {
-    pub fn get_field(&self, field_name: &FieldName) -> Result<&FieldView, PermissionError> {
+    pub fn get_field(&self, field_name: &FieldName) -> Result<&FieldView<'_>, PermissionError> {
         self.fields
             .get(field_name)
             .ok_or_else(|| PermissionError::ObjectFieldNotFound {
@@ -165,24 +167,22 @@ pub fn get_model<'metadata>(
         session_variables,
         &metadata.conditions,
         &mut plan_state.condition_cache,
+    )? && is_allowed_access_to_object_type(
+        metadata,
+        &model.model.data_type,
+        session_variables,
+        &mut plan_state.condition_cache,
     )? {
-        if is_allowed_access_to_object_type(
-            metadata,
-            &model.model.data_type,
-            session_variables,
-            &mut plan_state.condition_cache,
-        )? {
-            if let Some(model_source) = &model.model.source {
-                return Ok(ModelView {
-                    data_type: &model.model.data_type,
-                    source: model_source,
-                    permission,
-                });
-            }
-            return Err(PermissionError::ModelHasNoSource {
-                model_name: model_name.clone(),
+        if let Some(model_source) = &model.model.source {
+            return Ok(ModelView {
+                data_type: &model.model.data_type,
+                source: model_source,
+                permission,
             });
         }
+        return Err(PermissionError::ModelHasNoSource {
+            model_name: model_name.clone(),
+        });
     }
 
     Err(PermissionError::ModelNotAccessible {
@@ -234,12 +234,11 @@ pub fn get_command<'a>(
         session_variables,
         &metadata.conditions,
         &mut plan_state.condition_cache,
-    )? {
-        if is_allowed_access_to_return_type {
-            return Ok(CommandView {
-                argument_presets: command_permission.argument_presets,
-            });
-        }
+    )? && is_allowed_access_to_return_type
+    {
+        return Ok(CommandView {
+            argument_presets: command_permission.argument_presets,
+        });
     }
 
     Err(PermissionError::CommandNotAccessible {
@@ -292,4 +291,24 @@ fn get_accessible_fields_for_object<'a>(
         conditions,
         condition_cache,
     )?)
+}
+
+pub fn can_access_view(
+    metadata: &Metadata,
+    view_name: &Qualified<ViewName>,
+    session_variables: &SessionVariables,
+    conditions: &Conditions,
+    condition_cache: &mut ConditionCache,
+) -> Result<bool, PermissionError> {
+    match metadata.views.get(view_name) {
+        Some(view_with_permissions) => Ok(evaluate_view_authorization_rules(
+            &view_with_permissions.permissions.authorization_rules,
+            session_variables,
+            conditions,
+            condition_cache,
+        )?),
+        None => Err(PermissionError::ViewNotFound {
+            view_name: view_name.clone(),
+        }),
+    }
 }

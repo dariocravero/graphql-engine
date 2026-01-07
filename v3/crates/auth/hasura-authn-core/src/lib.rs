@@ -27,7 +27,13 @@ pub use open_dds::{
 };
 
 #[derive(
-    Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize, derive_more::Display,
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+    serde::Serialize,
+    serde::Deserialize,
+    derive_more::with_trait::Display,
 )]
 /// Value of a session variable, used to capture session variable input from parsed sources (jwt, webhook, etc)
 /// and unparsed sources (http headers)
@@ -198,7 +204,7 @@ impl Identity {
     pub fn get_role_authorization(
         &self,
         role: Option<&Role>,
-    ) -> Result<Cow<RoleAuthorization>, SessionError> {
+    ) -> Result<Cow<'_, RoleAuthorization>, SessionError> {
         match self {
             Identity::RoleEmulationEnabled(admin_role) => Ok(Cow::Owned(RoleAuthorization {
                 role: role.cloned().unwrap_or(admin_role.clone()),

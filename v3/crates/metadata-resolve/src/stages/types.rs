@@ -1,3 +1,4 @@
+use open_dds::views::ViewName;
 use serde_with::serde_as;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -40,6 +41,8 @@ pub struct Metadata {
     #[serde_as(as = "Vec<(_, _)>")]
     pub aggregate_expressions:
         BTreeMap<Qualified<AggregateExpressionName>, aggregates::AggregateExpression>,
+    #[serde_as(as = "Vec<(_, _)>")]
+    pub views: IndexMap<Qualified<ViewName>, crate::stages::view_permissions::ViewWithPermissions>,
     pub graphql_config: graphql_config::GlobalGraphqlConfig,
     pub plugin_configs: LifecyclePluginConfigs,
     pub roles: BTreeSet<Role>,

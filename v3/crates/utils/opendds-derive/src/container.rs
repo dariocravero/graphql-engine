@@ -1,3 +1,6 @@
+#![allow(clippy::needless_continue)]
+/// There are a lot of `continue` statements in `darling` proc macros
+/// so suppress the warning for the whole file.
 use convert_case::{Case, Casing};
 use std::sync::OnceLock;
 
@@ -392,12 +395,12 @@ impl<'a> EnumVariant<'a> {
 
 /// Check whether the type is `Option<T>`
 fn is_option_type(ty: &syn::Type) -> bool {
-    if let syn::Type::Path(syn::TypePath { path, .. }) = ty {
-        if path.segments.len() == 1 {
-            let segment = &path.segments[0];
-            if segment.ident == "Option" {
-                return true;
-            }
+    if let syn::Type::Path(syn::TypePath { path, .. }) = ty
+        && path.segments.len() == 1
+    {
+        let segment = &path.segments[0];
+        if segment.ident == "Option" {
+            return true;
         }
     }
     false
