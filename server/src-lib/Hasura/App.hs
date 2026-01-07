@@ -1570,7 +1570,7 @@ mkPgSourceResolver pgLogger env sourceName config = runExceptT do
       replicaResults <- forM readReplicaConfigs $ \replicaConfig -> do
         let PostgresSourceConnInfo replicaUrlConf replicaPoolSettings replicaAllowPrepare _ _ = replicaConfig
         -- Use same defaults as primary if not specified
-        let (replicaMaxConns, replicaIdleTimeout, replicaRetries) = 
+        let (replicaMaxConns, replicaIdleTimeout, replicaRetries, replicaConnLifetime) =
               getDefaultPGPoolSettingIfNotExists replicaPoolSettings defaultPostgresPoolSettings
         replicaConnDetails <- resolveUrlConf env replicaUrlConf
         let replicaConnInfo = PG.ConnInfo replicaRetries replicaConnDetails
@@ -1579,7 +1579,7 @@ mkPgSourceResolver pgLogger env sourceName config = runExceptT do
                 { PG.cpIdleTime = replicaIdleTimeout,
                   PG.cpConns = replicaMaxConns,
                   PG.cpAllowPrepare = replicaAllowPrepare,
-                  PG.cpMbLifetime = ppsConnectionLifetime =<< replicaPoolSettings,
+                  PG.cpMbLifetime = replicaConnLifetime,
                   PG.cpTimeout = ppsPoolTimeout =<< replicaPoolSettings
                 }
             replicaContext = J.object [("source" J..= sourceName), ("replica" J..= True)]
