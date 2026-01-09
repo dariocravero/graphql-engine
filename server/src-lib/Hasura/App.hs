@@ -1359,6 +1359,7 @@ mkHGEServer setupHook appStateRef consoleType ekgStore = do
             appEnvManager
             (getSchemaCache appStateRef)
             (acEventEngineCtx <$> getAppContext appStateRef)
+            (acEnvironment <$> getAppContext appStateRef)
             activeEventProcessingThreads
             lockedEventsCtx
             appEnvServerMetrics

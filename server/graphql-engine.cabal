@@ -1043,6 +1043,7 @@ library
                      , Hasura.Eventing.Common
                      , Hasura.Eventing.EventTrigger
                      , Hasura.Eventing.HTTP
+                     , Hasura.Eventing.Lambda
                      , Hasura.Eventing.ScheduledTrigger
                      , Hasura.Eventing.ScheduledTrigger.Types
                      , Hasura.Name

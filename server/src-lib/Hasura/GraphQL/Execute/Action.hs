@@ -59,6 +59,7 @@ import Hasura.Backends.Postgres.Types.Function qualified as TF
 import Hasura.Base.Error
 import Hasura.EncJSON
 import Hasura.Eventing.Common
+import Hasura.Eventing.Lambda (mkLambdaAwareRequest)
 import Hasura.Function.Cache
 import Hasura.GraphQL.Execute.Action.Types as Types
 import Hasura.GraphQL.Parser.Name qualified as GName
@@ -651,12 +652,16 @@ callWebhook
         actionContext = _awpAction actionWebhookPayload
         sessionVars = Just $ _awpSessionVariables actionWebhookPayload
 
-    initReq <- liftIO $ HTTP.mkRequestThrow webhookUrl
+    initReq <- case mkLambdaAwareRequest webhookUrl of
+      Left err -> throw500 $ "Invalid webhook URL: " <> tshow err
+      Right r -> pure r
 
-    let req =
+    let -- Preserve any headers from initReq (e.g., Lambda URL header) and add new ones
+        existingHeaders = view HTTP.headers initReq
+        req =
           initReq
             & set HTTP.method "POST"
-            & set HTTP.headers hdrs
+            & set HTTP.headers (existingHeaders <> hdrs)
             & set HTTP.body (HTTP.RequestBodyLBS requestBody)
             & set HTTP.timeout responseTimeout
 
@@ -680,7 +685,7 @@ callWebhook
         actualSize = fromMaybe requestBodySize transformedReqSize
 
     httpResponse <-
-      Tracing.traceHTTPRequest tracesPropagator actualReq $ \request ->
+      Tracing.traceHTTPRequestWithLambda env tracesPropagator actualReq $ \request ->
         liftIO . try $ HTTP.httpLbs request manager
 
     let requestInfo =

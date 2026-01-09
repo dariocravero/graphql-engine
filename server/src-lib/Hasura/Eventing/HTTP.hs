@@ -42,7 +42,7 @@ module Hasura.Eventing.HTTP
 where
 
 import Control.Exception (try)
-import Control.Lens (preview, set, (.~))
+import Control.Lens (preview, set, view, (.~))
 import Data.Aeson qualified as J
 import Data.Aeson.Encoding qualified as JE
 import Data.Aeson.Key qualified as J
@@ -53,6 +53,7 @@ import Data.ByteString.Lazy (ByteString)
 import Data.ByteString.Lazy qualified as LBS
 import Data.CaseInsensitive qualified as CI
 import Data.Either
+import Data.Environment qualified as Env
 import Data.Has
 import Data.HashSet qualified as HashSet
 import Data.Int (Int64)
@@ -67,6 +68,7 @@ import Hasura.HTTP
 import Hasura.Logging
 import Hasura.Prelude
 import Hasura.RQL.DDL.Webhook.Transform qualified as Transform
+import Hasura.Eventing.Lambda (mkLambdaAwareRequest)
 import Hasura.RQL.Types.Common (ResolvedWebhook (..))
 import Hasura.RQL.Types.EventTrigger
 import Hasura.RQL.Types.Eventing
@@ -315,7 +317,21 @@ logHTTPForST = logHTTPForTriggers
 runHTTP :: (MonadIO m) => HTTP.Manager -> HTTP.Request -> m (Either (HTTPErr a) (HTTPResp a))
 runHTTP manager req = do
   res <- liftIO $ try $ HTTP.httpLbs req manager
-  return $ either (Left . HClient . HttpException) anyBodyParser res
+  return $ either (Left . HClient . HttpException) parseResponse res
+  where
+    -- Parse response, checking for Lambda function errors.
+    -- Lambda returns HTTP 200 even when the function fails - the error is
+    -- indicated by the X-Amz-Function-Error header. We convert this to a
+    -- non-2xx status so it's treated as an error for retry purposes.
+    parseResponse resp =
+      let headers = HTTP.responseHeaders resp
+          hasLambdaError = isJust $ lookup "X-Amz-Function-Error" headers
+          -- If Lambda function errored, change status to 502 to trigger retry logic
+          resp' =
+            if hasLambdaError
+              then resp {HTTP.responseStatus = HTTP.status502}
+              else resp
+       in anyBodyParser resp'
 
 data TransformableRequestError a
   = HTTPError J.Value (HTTPErr a)
@@ -335,13 +351,15 @@ mkRequest ::
   m RequestDetails
 mkRequest headers timeout payload mRequestTransform (ResolvedWebhook webhook) =
   let body = fromMaybe J.Null $ J.decode @J.Value payload
-   in case HTTP.mkRequestEither webhook of
+   in case mkLambdaAwareRequest webhook of
         Left excp -> throwError $ HTTPError body (HClient $ HttpException excp)
         Right initReq ->
-          let req =
+          let -- Preserve any headers from initReq (e.g., Lambda URL header) and add new ones
+              existingHeaders = view HTTP.headers initReq
+              req =
                 initReq
                   & set HTTP.method "POST"
-                  & set HTTP.headers headers
+                  & set HTTP.headers (existingHeaders <> headers)
                   & set HTTP.body (HTTP.RequestBodyLBS payload)
                   & set HTTP.timeout timeout
               sessionVars = do
@@ -370,18 +388,19 @@ invokeRequest ::
     MonadIO m,
     MonadTrace m
   ) =>
+  Env.Environment ->
   RequestDetails ->
   Maybe Transform.ResponseTransform ->
   Maybe SessionVariables ->
   ((Either (HTTPErr a) (HTTPResp a)) -> RequestDetails -> m ()) ->
   HttpPropagator ->
   m (HTTPResp a)
-invokeRequest reqDetails@RequestDetails {..} respTransform' sessionVars logger tracesPropagator = do
+invokeRequest env reqDetails@RequestDetails {..} respTransform' sessionVars logger tracesPropagator = do
   let finalReq = fromMaybe _rdOriginalRequest _rdTransformedRequest
       reqBody = fromMaybe J.Null $ preview (HTTP.body . HTTP._RequestBodyLBS) finalReq >>= J.decode @J.Value
   manager <- asks getter
   -- Perform the HTTP Request
-  eitherResp <- traceHTTPRequest tracesPropagator finalReq $ runHTTP manager
+  eitherResp <- traceHTTPRequestWithLambda env tracesPropagator finalReq $ runHTTP manager
   -- Log the result along with the pre/post transformation Request data
   logger eitherResp reqDetails
   resp <- eitherResp `onLeft` (throwError . HTTPError reqBody)

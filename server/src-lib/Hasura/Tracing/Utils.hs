@@ -4,14 +4,17 @@
 -- here in the core engine code.
 module Hasura.Tracing.Utils
   ( traceHTTPRequest,
+    traceHTTPRequestWithLambda,
     attachSourceConfigAttributes,
     composedPropagator,
   )
 where
 
 import Control.Lens
+import Data.Environment qualified as Env
 import Data.String
 import Data.Text.Extended (toTxt)
+import Hasura.Eventing.Lambda (transformLambdaRequest)
 import Hasura.Prelude
 import Hasura.RQL.Types.SourceConfiguration (HasSourceConfiguration (..))
 import Hasura.Tracing.Class
@@ -48,6 +51,29 @@ traceHTTPRequest propagator req f = do
   where
     toHeaders :: TraceContext -> [HTTP.Header]
     toHeaders context = inject propagator context []
+
+-- | Like 'traceHTTPRequest', but handles Lambda URL transformation.
+--
+-- If the request URL starts with @aws://@ scheme, it is transparently transformed
+-- to a signed HTTPS request to the AWS Lambda Invoke API before execution.
+-- Otherwise the request is passed through unchanged.
+--
+-- Note: Lambda function errors (indicated by @X-Amz-Function-Error@ header) are
+-- handled at the HTTP response parsing layer (see 'runHTTP' in Eventing.HTTP).
+traceHTTPRequestWithLambda ::
+  (MonadIO m, MonadTrace m) =>
+  Env.Environment ->
+  HttpPropagator ->
+  -- | HTTP request (may have aws:// URL for Lambda)
+  HTTP.Request ->
+  -- | Function that executes the request
+  (HTTP.Request -> m a) ->
+  m a
+traceHTTPRequestWithLambda env propagator req f = do
+  -- Transform Lambda URLs (aws://) to signed HTTPS requests
+  transformedReq <- liftIO $ transformLambdaRequest env req
+  -- Execute with tracing (the transformed request is used for both tracing metadata and execution)
+  traceHTTPRequest propagator transformedReq f
 
 attachSourceConfigAttributes :: forall b m. (HasSourceConfiguration b, MonadTrace m) => SourceConfig b -> m ()
 attachSourceConfigAttributes sourceConfig = do

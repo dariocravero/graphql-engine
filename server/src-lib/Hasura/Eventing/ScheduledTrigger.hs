@@ -247,6 +247,7 @@ processCronEvents ::
     Tracing.MonadTrace m,
     MonadBaseControl IO m
   ) =>
+  Env.Environment ->
   L.Logger L.Hasura ->
   HTTP.Manager ->
   SchemaCache ->
@@ -256,7 +257,7 @@ processCronEvents ::
   TVar (Set.Set CronEventId) ->
   TriggersErrorLogLevelStatus ->
   m ()
-processCronEvents logger httpMgr sc scheduledTriggerMetrics cronEvents cronTriggersInfo lockedCronEvents triggersErrorLogLevelStatus = do
+processCronEvents env logger httpMgr sc scheduledTriggerMetrics cronEvents cronTriggersInfo lockedCronEvents triggersErrorLogLevelStatus = do
   -- save the locked cron events that have been fetched from the
   -- database, the events stored here will be unlocked in case a
   -- graceful shutdown is initiated in midst of processing these events
@@ -287,6 +288,7 @@ processCronEvents logger httpMgr sc scheduledTriggerMetrics cronEvents cronTrigg
               runExceptT
                 $ flip runReaderT (logger, httpMgr)
                 $ processScheduledEvent
+                  env
                   sc
                   scheduledTriggerMetrics
                   id'
@@ -369,7 +371,7 @@ processOneOffScheduledEvents
           Right (webhookEnvRecord, eventHeaderInfo) -> do
             let processScheduledEventAction =
                   flip runReaderT (logger, httpMgr)
-                    $ processScheduledEvent schemaCache scheduledTriggerMetrics _ooseId eventHeaderInfo retryCtx payload webhookEnvRecord OneOff triggersErrorLogLevelStatus
+                    $ processScheduledEvent env schemaCache scheduledTriggerMetrics _ooseId eventHeaderInfo retryCtx payload webhookEnvRecord OneOff triggersErrorLogLevelStatus
 
                 eventTimeout = unrefine $ strcTimeoutSeconds $ _ooseRetryConf
 
@@ -432,7 +434,7 @@ processScheduledTriggers getEnvHook logger statsLogger httpMgr scheduledTriggerM
         Left e -> logInternalError e
         Right (cronEvents, oneOffEvents) -> do
           logFetchedScheduledEventsStats statsLogger (CronEventsCount $ length cronEvents) (OneOffScheduledEventsCount $ length oneOffEvents)
-          processCronEvents logger httpMgr sc scheduledTriggerMetrics cronEvents cronTriggersInfo leCronEvents triggersErrorLogLevelStatus
+          processCronEvents env logger httpMgr sc scheduledTriggerMetrics cronEvents cronTriggersInfo leCronEvents triggersErrorLogLevelStatus
           processOneOffScheduledEvents env logger httpMgr sc scheduledTriggerMetrics oneOffEvents leOneOffEvents triggersErrorLogLevelStatus
       -- NOTE: cron events are scheduled at times with minute resolution (as on
       -- unix), while one-off events can be set for arbitrary times. The sleep
@@ -451,6 +453,7 @@ processScheduledEvent ::
     MonadMetadataStorage m,
     MonadError QErr m
   ) =>
+  Env.Environment ->
   SchemaCache ->
   ScheduledTriggerMetrics ->
   ScheduledEventId ->
@@ -461,7 +464,7 @@ processScheduledEvent ::
   ScheduledEventType ->
   TriggersErrorLogLevelStatus ->
   m ()
-processScheduledEvent schemaCache scheduledTriggerMetrics eventId eventHeaders retryCtx payload webhookUrl type' triggersErrorLogLevelStatus =
+processScheduledEvent env schemaCache scheduledTriggerMetrics eventId eventHeaders retryCtx payload webhookUrl type' triggersErrorLogLevelStatus =
   Tracing.newTrace Tracing.sampleAlways traceNote do
     currentTime <- liftIO getCurrentTime
     let retryConf = _rctxConf retryCtx
@@ -504,7 +507,7 @@ processScheduledEvent schemaCache scheduledTriggerMetrics eventId eventHeaders r
                         (OneOff, Left _err) -> Prometheus.Counter.inc (stmOneOffEventsInvocationTotalFailure scheduledTriggerMetrics)
                         (OneOff, Right _) -> Prometheus.Counter.inc (stmOneOffEventsInvocationTotalSuccess scheduledTriggerMetrics)
                   sessionVars = _rdSessionVars reqDetails
-              resp <- invokeRequest reqDetails responseTransform sessionVars logger tracesPropagator
+              resp <- invokeRequest env reqDetails responseTransform sessionVars logger tracesPropagator
               pure (request, resp)
         case eitherReqRes of
           Right (req, resp) ->

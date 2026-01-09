@@ -54,6 +54,7 @@ import Data.Aeson.Key qualified as Key
 import Data.Aeson.KeyMap qualified as KeyMap
 import Data.Aeson.Lens qualified as JL
 import Data.Either (isRight)
+import Data.Environment qualified as Env
 import Data.Has
 import Data.HashMap.Strict qualified as HashMap
 import Data.SerializableBlob qualified as SB
@@ -307,6 +308,7 @@ processEventQueue ::
   HTTP.Manager ->
   IO SchemaCache ->
   IO EventEngineCtx ->
+  IO Env.Environment ->
   TVar Int ->
   LockedEventsCtx ->
   ServerMetrics ->
@@ -314,7 +316,7 @@ processEventQueue ::
   MaintenanceMode () ->
   TriggersErrorLogLevelStatus ->
   m (Forever m)
-processEventQueue logger statsLogger httpMgr getSchemaCache getEventEngineCtx activeEventProcessingThreads LockedEventsCtx {leEvents} serverMetrics eventTriggerMetrics maintenanceMode triggersErrorLogLevelStatus = do
+processEventQueue logger statsLogger httpMgr getSchemaCache getEventEngineCtx getEnvHook activeEventProcessingThreads LockedEventsCtx {leEvents} serverMetrics eventTriggerMetrics maintenanceMode triggersErrorLogLevelStatus = do
   events0 <- popEventsBatch
   return $ Forever (events0, 0, False) go
   where
@@ -598,6 +600,7 @@ processEventQueue logger statsLogger httpMgr getSchemaCache getEventEngineCtx ac
                           -- This bracket is used to increment and decrement an
                           -- HTTP Worker EKG Gauge for the duration of the
                           -- request invocation
+                          env <- liftIO getEnvHook
                           resp <-
                             bracket_
                               ( do
@@ -608,7 +611,7 @@ processEventQueue logger statsLogger httpMgr getSchemaCache getEventEngineCtx ac
                                   liftIO $ EKG.Gauge.dec $ smNumEventHTTPWorkers serverMetrics
                                   liftIO $ Prometheus.Gauge.dec (eventTriggerHTTPWorkers eventTriggerMetrics)
                               )
-                              (invokeRequest reqDetails responseTransform (_rdSessionVars reqDetails) logger' tracesPropagator)
+                              (invokeRequest env reqDetails responseTransform (_rdSessionVars reqDetails) logger' tracesPropagator)
                           pure (request, resp)
                     case eitherReqRes of
                       Right (req, resp) -> do

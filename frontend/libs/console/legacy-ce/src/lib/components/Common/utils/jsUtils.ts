@@ -56,7 +56,16 @@ export const isPromise = (value: any): value is typeof Promise => {
   return value.constructor.name === 'Promise';
 };
 
+// Lambda URL pattern: aws://arn:aws:lambda:{region}:{account}:function:{name}
+const LAMBDA_URL_PATTERN =
+  /^aws:\/\/arn:aws:lambda:[a-z0-9-]+:\d+:function:[a-zA-Z0-9_-]+(:[a-zA-Z0-9_-]+)?(\?.*)?$/;
+
 export const isValidURL = (value: string) => {
+  // Check for Lambda URLs first
+  if (value.startsWith('aws://')) {
+    return LAMBDA_URL_PATTERN.test(value);
+  }
+  // Standard HTTP/HTTPS URL validation
   try {
     new URL(value);
   } catch {

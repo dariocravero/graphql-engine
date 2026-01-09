@@ -133,9 +133,30 @@ The table operation on which the Event Trigger will be invoked.
 
 **Webhook URL**
 
-The HTTP(s) URL which will be called with the event payload on configured operation. Must be a `POST` handler. This URL
+The URL which will be called with the event payload on configured operation. Must be a `POST` handler. This URL
 can be entered manually or can be picked up from an environment variable (_the environment variable needs to be set
 before using it for this configuration_).
+
+Hasura supports two URL schemes:
+
+- **`https://`** - Standard HTTP webhook endpoint
+- **`aws://`** - Direct AWS Lambda invocation using the function ARN
+
+**Examples:**
+
+```
+https://my-webhook.example.com/handler
+aws://arn:aws:lambda:us-east-1:123456789:function:myFunc
+aws://arn:aws:lambda:us-east-1:123456789:function:myFunc?invocation_type=event
+```
+
+For `aws://` URLs, Hasura automatically signs requests using AWS Signature V4. Set the following environment variables:
+
+- `AWS_ACCESS_KEY_ID`
+- `AWS_SECRET_ACCESS_KEY`
+- `AWS_SESSION_TOKEN` (optional, for temporary credentials)
+
+The optional `?invocation_type=event` query parameter enables asynchronous Lambda invocation.
 
 :::info Note
 
