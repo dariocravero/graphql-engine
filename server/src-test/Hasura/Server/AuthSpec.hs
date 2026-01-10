@@ -174,6 +174,31 @@ getUserInfoWithExpTimeTests = describe "getUserInfo" $ do
         getUserInfoWithExpTime mempty [sessionVariableToHeader userRoleHeader "r00t"] mode
           `shouldReturn` Right ourUnauthRole
 
+    describe "multiple admin secrets" $ do
+      mode <-
+        runIO
+          $ setupAuthMode'E (Just $ Set.fromList [hashAdminSecret "secret1", hashAdminSecret "secret2", hashAdminSecret "secret3"]) Nothing mempty Nothing
+
+      it "accepts when first admin secret matches" $ do
+        getUserInfoWithExpTime mempty [sessionVariableToHeader adminSecretHeader "secret1"] mode
+          `shouldReturn` Right adminRoleName
+
+      it "accepts when second admin secret matches" $ do
+        getUserInfoWithExpTime mempty [sessionVariableToHeader adminSecretHeader "secret2"] mode
+          `shouldReturn` Right adminRoleName
+
+      it "accepts when third admin secret matches" $ do
+        getUserInfoWithExpTime mempty [sessionVariableToHeader adminSecretHeader "secret3"] mode
+          `shouldReturn` Right adminRoleName
+
+      it "rejects when secret doesn't match any" $ do
+        getUserInfoWithExpTime mempty [sessionVariableToHeader adminSecretHeader "wrong-secret"] mode
+          `shouldReturn` Left AccessDenied
+
+      it "accepts any secret, honoring role request" $ do
+        getUserInfoWithExpTime mempty [sessionVariableToHeader adminSecretHeader "secret2", sessionVariableToHeader userRoleHeader "r00t"] mode
+          `shouldReturn` Right (mkRoleNameE "r00t")
+
   -- Unauthorized role is not supported for webhook
   describe "webhook" $ do
     mode <-

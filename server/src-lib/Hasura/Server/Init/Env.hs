@@ -206,6 +206,11 @@ instance FromEnv Integer where
 instance FromEnv Auth.AdminSecretHash where
   fromEnv = Right . Auth.hashAdminSecret . Text.pack
 
+instance FromEnv (HashSet.HashSet Auth.AdminSecretHash) where
+  fromEnv s = do
+    secrets <- J.eitherDecode (BLU.fromString s) :: Either String [Text]
+    Right $ HashSet.fromList $ map Auth.hashAdminSecret secrets
+
 instance FromEnv RoleName where
   fromEnv string =
     case mkRoleName (Text.pack string) of

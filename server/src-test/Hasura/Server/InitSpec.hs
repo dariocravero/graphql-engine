@@ -7,6 +7,7 @@ where
 
 --------------------------------------------------------------------------------
 
+import Data.Either (isLeft)
 import Data.HashSet qualified as Set
 import Data.Time (NominalDiffTime)
 import Database.PG.Query qualified as Query
@@ -75,6 +76,7 @@ emptyServeOptionsRaw =
       rsoEnableAllowList = UUT.AllowListDisabled,
       rsoEnabledLogTypes = Nothing,
       rsoLogLevel = Nothing,
+      rsoRedactedLogFields = Nothing,
       rsoDevMode = UUT.DevModeDisabled,
       rsoAdminInternalErrors = Nothing,
       rsoEventsHttpPoolSize = Nothing,
@@ -315,6 +317,41 @@ mkServeOptionsSpec =
             result = UUT.runWithEnv env (UUT.mkServeOptions @Hasura rawServeOptions)
 
         fmap UUT.soAdminSecret result `Hspec.shouldBe` Right (Set.singleton (Auth.hashAdminSecret "Whats the big deal"))
+
+      Hspec.it "Multiple secrets from HASURA_GRAPHQL_ADMIN_SECRETS" $ do
+        let -- Given
+            rawServeOptions = emptyServeOptionsRaw
+            -- When
+            env = [(UUT._envVar UUT.adminSecretsOption, "[\"secret1\", \"secret2\", \"secret3\"]")]
+            -- Then
+            result = UUT.runWithEnv env (UUT.mkServeOptions @Hasura rawServeOptions)
+            expected = Set.fromList $ map Auth.hashAdminSecret ["secret1", "secret2", "secret3"]
+
+        fmap UUT.soAdminSecret result `Hspec.shouldBe` Right expected
+
+      Hspec.it "HASURA_GRAPHQL_ADMIN_SECRETS takes precedence over HASURA_GRAPHQL_ADMIN_SECRET" $ do
+        let -- Given
+            rawServeOptions = emptyServeOptionsRaw
+            -- When
+            env =
+              [ (UUT._envVar UUT.adminSecretsOption, "[\"secret1\", \"secret2\"]"),
+                (UUT._envVar UUT.adminSecretOption, "single-secret")
+              ]
+            -- Then
+            result = UUT.runWithEnv env (UUT.mkServeOptions @Hasura rawServeOptions)
+            expected = Set.fromList $ map Auth.hashAdminSecret ["secret1", "secret2"]
+
+        fmap UUT.soAdminSecret result `Hspec.shouldBe` Right expected
+
+      Hspec.it "Invalid JSON in HASURA_GRAPHQL_ADMIN_SECRETS returns error" $ do
+        let -- Given
+            rawServeOptions = emptyServeOptionsRaw
+            -- When
+            env = [(UUT._envVar UUT.adminSecretsOption, "not-valid-json")]
+            -- Then
+            result = UUT.runWithEnv env (UUT.mkServeOptions @Hasura rawServeOptions)
+
+        isLeft result `Hspec.shouldBe` True
 
     Hspec.describe "soAuthHook" $ do
       Hspec.it "Default Hook Mode == GET" $ do

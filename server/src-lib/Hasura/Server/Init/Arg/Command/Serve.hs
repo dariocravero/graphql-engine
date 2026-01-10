@@ -17,6 +17,7 @@ module Hasura.Server.Init.Arg.Command.Serve
     pgPoolTimeoutOption,
     txIsolationOption,
     adminSecretOption,
+    adminSecretsOption,
     accessKeyOption,
     authHookOption,
     authHookModeOption,
@@ -378,6 +379,14 @@ adminSecretOption =
     { Config._default = (),
       Config._envVar = "HASURA_GRAPHQL_ADMIN_SECRET",
       Config._helpMessage = "Admin Secret key, required to access this instance"
+    }
+
+adminSecretsOption :: Config.Option ()
+adminSecretsOption =
+  Config.Option
+    { Config._default = (),
+      Config._envVar = "HASURA_GRAPHQL_ADMIN_SECRETS",
+      Config._helpMessage = "Admin Secret keys (JSON array), required to access this instance. Takes precedence over HASURA_GRAPHQL_ADMIN_SECRET"
     }
 
 parseAccessKey :: Opt.Parser (Maybe Auth.AdminSecretHash)

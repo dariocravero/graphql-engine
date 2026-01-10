@@ -156,7 +156,15 @@ mkServeOptions sor@ServeOptionsRaw {..} = do
   soHost <- withOptionDefault rsoHost serveHostOption
   soConnParams <- mkConnParams rsoConnParams
   soTxIso <- withOptionDefault rsoTxIso txIsolationOption
-  soAdminSecret <- maybe mempty (HashSet.singleton) <$> withOptions rsoAdminSecret [adminSecretOption, accessKeyOption]
+  soAdminSecret <- do
+    -- Try plural HASURA_GRAPHQL_ADMIN_SECRETS first (takes precedence)
+    mAdminSecrets <- withOption Nothing adminSecretsOption
+    case mAdminSecrets of
+      Just secrets -> pure secrets
+      Nothing -> do
+        -- Fall back to singular HASURA_GRAPHQL_ADMIN_SECRET
+        mAdminSecret <- withOptions rsoAdminSecret [adminSecretOption, accessKeyOption]
+        pure $ maybe mempty HashSet.singleton mAdminSecret
   soAuthHook <- mkAuthHook rsoAuthHook
   soJwtSecret <- maybeToList <$> withOption rsoJwtSecret jwtSecretOption
   soUnAuthRole <- withOption rsoUnAuthRole unAuthRoleOption
