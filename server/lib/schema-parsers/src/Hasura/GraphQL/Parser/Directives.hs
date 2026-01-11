@@ -12,6 +12,7 @@ module Hasura.GraphQL.Parser.Directives
     skip,
     cached,
     multipleRootFields,
+    skipReplica,
     -- parsing utilities
     parseDirectives,
     withDirective,
@@ -22,6 +23,7 @@ module Hasura.GraphQL.Parser.Directives
     includeDirective,
     cachedDirective,
     multipleRootFieldsDirective,
+    skipReplicaDirective,
   )
 where
 
@@ -91,7 +93,7 @@ inclusionDirectives :: forall m origin. (MonadParse m) => [Directive origin m]
 inclusionDirectives = [includeDirective @m, skipDirective @m]
 
 customDirectives :: forall m origin. (MonadParse m) => [Directive origin m]
-customDirectives = [cachedDirective @m, multipleRootFieldsDirective @m]
+customDirectives = [cachedDirective @m, multipleRootFieldsDirective @m, skipReplicaDirective @m]
 
 -- | Parses directives, given a location. Ensures that all directives are known
 -- and match the location; subsequently builds a dependent map of the results,
@@ -203,6 +205,21 @@ multipleRootFieldsDirective =
 
 multipleRootFields :: DirectiveKey ()
 multipleRootFields = DirectiveKey Name.__multiple_top_level_fields
+
+-- Skip replica directive - forces query to use primary database.
+
+skipReplicaDirective :: (MonadParse m) => Directive origin m
+skipReplicaDirective =
+  mkDirective
+    Name._skipReplica
+    (Just "Force query to use primary database instead of read replicas")
+    True -- advertised in schema
+    [G.DLExecutable G.EDLQUERY, G.DLExecutable G.EDLSUBSCRIPTION]
+    (pure ())
+    False
+
+skipReplica :: DirectiveKey ()
+skipReplica = DirectiveKey Name._skipReplica
 
 -- Built-in inclusion directives
 

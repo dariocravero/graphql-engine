@@ -35,8 +35,8 @@ instance BackendTransport 'BigQuery where
   runDBQuery = runQuery
   runDBQueryExplain = runQueryExplain
   runDBMutation = runMutation
-  runDBSubscription = error "Not supported."
-  runDBStreamingSubscription = error "Not supported"
+  runDBSubscription _ _ _ _ _ = error "Not supported."
+  runDBStreamingSubscription _ _ _ _ _ = error "Not supported"
 
 runQuery ::
   ( MonadIO m,
@@ -56,9 +56,11 @@ runQuery ::
   OnBaseMonad IdentityT (Maybe (AnyBackend ExecutionStats), EncJSON) ->
   Maybe Text ->
   ResolvedConnectionTemplate 'BigQuery ->
+  -- | Whether to skip read replicas (ignored for BigQuery)
+  Bool ->
   -- | Also return the time spent in the PG query; for telemetry.
   m (DiffTime, EncJSON)
-runQuery reqId query fieldName _userInfo logger _ _sourceConfig tx genSql _ = do
+runQuery reqId query fieldName _userInfo logger _ _sourceConfig tx genSql _ _skipReplica = do
   -- log the generated SQL and the graphql query
   -- FIXME: fix logging by making logQueryLog expect something backend agnostic!
   logQueryLog logger $ mkQueryLog (QueryLogKindDatabase Nothing) query fieldName genSql reqId

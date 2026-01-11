@@ -262,7 +262,7 @@ runInsert sqlGen q = do
   userInfo <- askUserInfo
   res <- convInsQ q
   let strfyNum = stringifyNum sqlGen
-  runTxWithCtx (_pscExecCtx sourceConfig) (Tx PG.ReadWrite Nothing) LegacyRQLQuery
+  runTxWithCtx (_pscExecCtx sourceConfig) (Tx PG.ReadWrite Nothing) LegacyRQLQuery False
     $ flip runReaderT emptyQueryTagsComment
     $ execInsertQuery strfyNum Nothing userInfo res
 

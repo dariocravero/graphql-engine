@@ -79,15 +79,17 @@ runPGQuery ::
   OnBaseMonad (PG.TxET QErr) (Maybe (AB.AnyBackend ExecutionStats), EncJSON) ->
   Maybe EQ.PreparedSql ->
   ResolvedConnectionTemplate ('Postgres pgKind) ->
+  -- | Whether to skip read replicas (force primary)
+  Bool ->
   -- | Also return the time spent in the PG query; for telemetry.
   m (DiffTime, EncJSON)
-runPGQuery reqId query fieldName _userInfo logger _ sourceConfig tx genSql resolvedConnectionTemplate = do
+runPGQuery reqId query fieldName _userInfo logger _ sourceConfig tx genSql resolvedConnectionTemplate skipReplica = do
   -- log the generated SQL and the graphql query
   logQueryLog logger $ mkQueryLog query fieldName genSql reqId (resolvedConnectionTemplate <$ resolvedConnectionTemplate)
   withElapsedTime
     $ newSpan ("Postgres Query for root field " <>> fieldName) SKInternal
     $ (<* attachSourceConfigAttributes @('Postgres pgKind) sourceConfig)
-    $ runQueryTx (_pscExecCtx sourceConfig) (GraphQLQuery resolvedConnectionTemplate)
+    $ runQueryTx (_pscExecCtx sourceConfig) (GraphQLQuery resolvedConnectionTemplate) skipReplica
     $ fmap snd (runOnBaseMonad tx)
 
 runPGMutation ::
@@ -116,7 +118,7 @@ runPGMutation reqId query fieldName userInfo logger _ sourceConfig tx _genSql re
   withElapsedTime
     $ newSpan ("Postgres Mutation for root field " <>> fieldName) SKInternal
     $ (<* attachSourceConfigAttributes @('Postgres pgKind) sourceConfig)
-    $ runTxWithCtxAndUserInfo userInfo (_pscExecCtx sourceConfig) (Tx PG.ReadWrite Nothing) (GraphQLQuery resolvedConnectionTemplate)
+    $ runTxWithCtxAndUserInfo userInfo (_pscExecCtx sourceConfig) (Tx PG.ReadWrite Nothing) (GraphQLQuery resolvedConnectionTemplate) False
     $ runOnBaseMonad tx
 
 runPGSubscription ::
@@ -125,11 +127,13 @@ runPGSubscription ::
   MultiplexedQuery ('Postgres pgKind) ->
   [(CohortId, CohortVariables)] ->
   ResolvedConnectionTemplate ('Postgres pgKind) ->
+  -- | Whether to skip read replicas (force primary)
+  Bool ->
   m (DiffTime, Either QErr [(CohortId, B.ByteString)])
-runPGSubscription sourceConfig query variables resolvedConnectionTemplate =
+runPGSubscription sourceConfig query variables resolvedConnectionTemplate skipReplica =
   withElapsedTime
     $ runExceptT
-    $ runQueryTx (_pscExecCtx sourceConfig) (GraphQLQuery resolvedConnectionTemplate)
+    $ runQueryTx (_pscExecCtx sourceConfig) (GraphQLQuery resolvedConnectionTemplate) skipReplica
     $ PGL.executeMultiplexedQuery query variables
 
 runPGStreamingSubscription ::
@@ -138,12 +142,14 @@ runPGStreamingSubscription ::
   MultiplexedQuery ('Postgres pgKind) ->
   [(CohortId, CohortVariables)] ->
   ResolvedConnectionTemplate ('Postgres pgKind) ->
+  -- | Whether to skip read replicas (force primary)
+  Bool ->
   m (DiffTime, Either QErr [(CohortId, B.ByteString, CursorVariableValues)])
-runPGStreamingSubscription sourceConfig query variables resolvedConnectionTemplate =
+runPGStreamingSubscription sourceConfig query variables resolvedConnectionTemplate skipReplica =
   withElapsedTime
     $ runExceptT
     $ do
-      res <- runQueryTx (_pscExecCtx sourceConfig) (GraphQLQuery resolvedConnectionTemplate) $ PGL.executeStreamingMultiplexedQuery query variables
+      res <- runQueryTx (_pscExecCtx sourceConfig) (GraphQLQuery resolvedConnectionTemplate) skipReplica $ PGL.executeStreamingMultiplexedQuery query variables
       pure $ res <&> (\(cohortId, cohortRes, cursorVariableVals) -> (cohortId, cohortRes, PG.getViaJSON cursorVariableVals))
 
 runPGQueryExplain ::
@@ -157,7 +163,7 @@ runPGQueryExplain ::
   DBStepInfo ('Postgres pgKind) ->
   m EncJSON
 runPGQueryExplain _ (DBStepInfo _ sourceConfig _ action resolvedConnectionTemplate) =
-  runQueryTx (_pscExecCtx sourceConfig) (GraphQLQuery resolvedConnectionTemplate)
+  runQueryTx (_pscExecCtx sourceConfig) (GraphQLQuery resolvedConnectionTemplate) False
     $ fmap arResult (runOnBaseMonad action)
 
 mkQueryLog ::
@@ -202,7 +208,7 @@ runPGMutationTransaction ::
 runPGMutationTransaction reqId query userInfo logger sourceConfig resolvedConnectionTemplate mutations = do
   logQueryLog logger $ mkQueryLog query (mkUnNamespacedRootFieldAlias Name._transaction) Nothing reqId (resolvedConnectionTemplate <$ resolvedConnectionTemplate)
   withElapsedTime
-    $ runTxWithCtxAndUserInfo userInfo (_pscExecCtx sourceConfig) (Tx PG.ReadWrite Nothing) (GraphQLQuery resolvedConnectionTemplate)
+    $ runTxWithCtxAndUserInfo userInfo (_pscExecCtx sourceConfig) (Tx PG.ReadWrite Nothing) (GraphQLQuery resolvedConnectionTemplate) False
     $ flip InsOrdHashMap.traverseWithKey mutations \fieldName dbsi ->
       newSpan ("Postgres Mutation for root field " <>> fieldName) SKInternal
         $ (<* attachSourceConfigAttributes @('Postgres pgKind) sourceConfig)

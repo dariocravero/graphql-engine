@@ -421,6 +421,7 @@ runGQ env sqlGenCtx sc enableAL readOnlyMode remoteSchemaResponsePriority header
     executePlan reqParsed runLimits execPlan = case execPlan of
       E.QueryExecutionPlan queryPlans asts dirMap -> do
         let cachedDirective = runIdentity <$> DM.lookup cached dirMap
+            skipReplicaFlag = isJust $ DM.lookup skipReplica dirMap
         -- Attempt to lookup a cached response in the query cache.
         (cachingHeaders, cachedValue) <- liftEitherM $ cacheLookup queryPlans asts cachedDirective reqParsed userInfo reqHeaders
         case cachedValue of
@@ -441,7 +442,7 @@ runGQ env sqlGenCtx sc enableAL readOnlyMode remoteSchemaResponsePriority header
           ResponseUncached storeResponseM -> runLimits $ do
             -- 1. 'traverse' the 'ExecutionPlan' executing every step.
             -- TODO: can this be a `catch` rather than a `runExceptT`?
-            (conclusion) <- runExceptT $ forWithKey queryPlans executeQueryStep
+            (conclusion) <- runExceptT $ forWithKey queryPlans (executeQueryStep skipReplicaFlag)
             -- 2. Construct an 'AnnotatedResponse' from the results of all steps in the 'ExecutionPlan'.
             (result, modelInfoList) <- buildResponseFromParts Telem.Query conclusion
             let response@(HttpResponse responseData _) = arResponse result
@@ -509,16 +510,17 @@ runGQ env sqlGenCtx sc enableAL readOnlyMode remoteSchemaResponsePriority header
         throw400 UnexpectedPayload "subscriptions are not supported over HTTP, use websockets instead"
 
     executeQueryStep ::
+      Bool ->
       RootFieldAlias ->
       EB.ExecutionStep ->
       ExceptT (Either GQExecError QErr) m (AnnotatedResponsePart, [ModelInfoPart])
-    executeQueryStep fieldName = \case
+    executeQueryStep skipReplicaFlag fieldName = \case
       E.ExecStepDB _headers exists remoteJoins -> doQErr $ do
         (telemTimeIO_DT, resp) <-
           AB.dispatchAnyBackend @BackendTransport
             exists
             \(EB.DBStepInfo _ sourceConfig genSql tx resolvedConnectionTemplate :: EB.DBStepInfo b) ->
-              runDBQuery @b reqId reqUnparsed fieldName userInfo logger agentLicenseKey sourceConfig (fmap (statsToAnyBackend @b) tx) genSql resolvedConnectionTemplate
+              runDBQuery @b reqId reqUnparsed fieldName userInfo logger agentLicenseKey sourceConfig (fmap (statsToAnyBackend @b) tx) genSql resolvedConnectionTemplate skipReplicaFlag
         (finalResponse, modelInfo) <-
           RJ.processRemoteJoins reqId logger agentLicenseKey env reqHeaders userInfo resp remoteJoins reqUnparsed tracesPropagator traceQueryStatus
         pure $ (AnnotatedResponsePart telemTimeIO_DT Telem.Local finalResponse [], modelInfo)
@@ -538,7 +540,7 @@ runGQ env sqlGenCtx sc enableAL readOnlyMode remoteSchemaResponsePriority header
         (,[]) <$> buildRaw json
       -- For `ExecStepMulti`, execute all steps and then concat them in a list
       E.ExecStepMulti lst -> do
-        _all <- traverse (executeQueryStep fieldName) lst
+        _all <- traverse (executeQueryStep skipReplicaFlag fieldName) lst
         let (allResponses, allModelInfo) = unzip _all
         pure $ (AnnotatedResponsePart 0 Telem.Local (encJFromList (map arpResponse allResponses)) [], concat allModelInfo)
 
@@ -572,7 +574,8 @@ runGQ env sqlGenCtx sc enableAL readOnlyMode remoteSchemaResponsePriority header
         (,[]) <$> buildRaw json
       -- For `ExecStepMulti`, execute all steps and then concat them in a list
       E.ExecStepMulti lst -> do
-        _all <- traverse (executeQueryStep fieldName) lst
+        -- Note: mutations always go to primary, so skipReplica is False
+        _all <- traverse (executeQueryStep False fieldName) lst
         let (allResponses, allModelInfo) = unzip _all
         pure $ (AnnotatedResponsePart 0 Telem.Local (encJFromList (map arpResponse allResponses)) [], concat allModelInfo)
 

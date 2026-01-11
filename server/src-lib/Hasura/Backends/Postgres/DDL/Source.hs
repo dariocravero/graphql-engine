@@ -172,7 +172,7 @@ resolveDatabaseMetadata ::
   m (Either QErr (DBObjectsIntrospection ('Postgres pgKind)))
 resolveDatabaseMetadata sourceMetadata sourceConfig = do
   enableNamingConventionSep2023 <- FF.checkFlag FF.namingConventionSep2023
-  runExceptT $ _pecRunTx (_pscExecCtx sourceConfig) (PGExecCtxInfo (Tx PG.ReadOnly Nothing) InternalRawQuery) do
+  runExceptT $ _pecRunTx (_pscExecCtx sourceConfig) (PGExecCtxInfo (Tx PG.ReadOnly Nothing) InternalRawQuery False) do
     tablesMeta <- fetchTableMetadata $ HashMap.keysSet $ InsOrdHashMap.toHashMap $ _smTables sourceMetadata
     let allFunctions =
           Set.fromList
@@ -201,7 +201,7 @@ prepareCatalog ::
   SourceConfig ('Postgres pgKind) ->
   ExceptT QErr m (RecreateEventTriggers, Version.SourceCatalogMigrationState)
 -- TODO: SHould we prepare the catalog in Serializable isolation mode like the 'prepareCatalog' of MSSQL
-prepareCatalog sourceConfig = _pecRunTx (_pscExecCtx sourceConfig) (PGExecCtxInfo (Tx PG.ReadWrite Nothing) InternalRawQuery) do
+prepareCatalog sourceConfig = _pecRunTx (_pscExecCtx sourceConfig) (PGExecCtxInfo (Tx PG.ReadWrite Nothing) InternalRawQuery False) do
   hdbCatalogExist <- doesSchemaExist "hdb_catalog"
   eventLogTableExist <- doesTableExist "hdb_catalog" "event_log"
   sourceVersionTableExist <- doesTableExist "hdb_catalog" "hdb_source_catalog_version"

@@ -45,6 +45,8 @@ class (BackendExecute b) => BackendTransport (b :: BackendType) where
     OnBaseMonad (ExecutionMonad b) (Maybe (AnyBackend ExecutionStats), EncJSON) ->
     Maybe (PreparedQuery b) ->
     ResolvedConnectionTemplate b ->
+    -- | Whether to skip read replicas (force primary)
+    Bool ->
     m (DiffTime, EncJSON)
   runDBMutation ::
     forall m.
@@ -73,6 +75,8 @@ class (BackendExecute b) => BackendTransport (b :: BackendType) where
     -- | WARNING: Postgres-specific, ignored by other backends
     [(CohortId, CohortVariables)] ->
     ResolvedConnectionTemplate b ->
+    -- | Whether to skip read replicas (force primary)
+    Bool ->
     m (DiffTime, Either QErr [(CohortId, B.ByteString)])
   runDBStreamingSubscription ::
     forall m.
@@ -82,6 +86,8 @@ class (BackendExecute b) => BackendTransport (b :: BackendType) where
     -- | WARNING: Postgres-specific, ignored by other backends
     [(CohortId, CohortVariables)] ->
     ResolvedConnectionTemplate b ->
+    -- | Whether to skip read replicas (force primary)
+    Bool ->
     m (DiffTime, Either QErr [(CohortId, B.ByteString, CursorVariableValues)])
   runDBQueryExplain ::
     forall m.

@@ -118,7 +118,9 @@ pollLiveQuery pollerId pollerResponseState lqOpts (sourceName, sourceConfig) rol
 
     -- concurrently process each batch
     batchesDetailsWithMaybeError <- A.forConcurrently cohortBatches $ \(batchId, cohorts) -> do
-      (queryExecutionTime, mxRes) <- runDBSubscription @b sourceConfig query (over (each . _2) C._csVariables cohorts) resolvedConnectionTemplate
+      -- Note: skipReplica is False for subscriptions. To enable skipReplica for subscriptions,
+      -- the flag would need to be threaded through the subscription plan and poller infrastructure.
+      (queryExecutionTime, mxRes) <- runDBSubscription @b sourceConfig query (over (each . _2) C._csVariables cohorts) resolvedConnectionTemplate False
 
       let dbExecTimeMetric = submDBExecTotalTime $ pmSubscriptionMetrics $ prometheusMetrics
       recordSubscriptionMetric

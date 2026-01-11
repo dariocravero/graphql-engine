@@ -6,6 +6,7 @@ module Hasura.GraphQL.Parser.DirectiveName
     _include,
     _refresh,
     _skip,
+    _skipReplica,
     _ttl,
     __multiple_top_level_fields,
   )
@@ -28,6 +29,9 @@ _refresh = [G.name|refresh|]
 
 _skip :: G.Name
 _skip = [G.name|skip|]
+
+_skipReplica :: G.Name
+_skipReplica = [G.name|skipReplica|]
 
 _ttl :: G.Name
 _ttl = [G.name|ttl|]

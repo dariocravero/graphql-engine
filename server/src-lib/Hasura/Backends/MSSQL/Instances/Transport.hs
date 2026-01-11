@@ -45,7 +45,7 @@ instance BackendTransport 'MSSQL where
   runDBQueryExplain = runQueryExplain
   runDBMutation = runMutation
   runDBSubscription = runSubscription
-  runDBStreamingSubscription _ _ _ _ =
+  runDBStreamingSubscription _ _ _ _ _ =
     liftIO . throwIO $ userError "runDBSubscription: not implemented for MS-SQL sources."
 
 newtype CohortResult = CohortResult (CohortId, Text)
@@ -73,9 +73,11 @@ runQuery ::
   OnBaseMonad (ExceptT QErr) (Maybe (AnyBackend ExecutionStats), EncJSON) ->
   Maybe (PreparedQuery 'MSSQL) ->
   ResolvedConnectionTemplate 'MSSQL ->
+  -- | Whether to skip read replicas (ignored for MSSQL)
+  Bool ->
   -- | Also return the time spent in the PG query; for telemetry.
   m (DiffTime, EncJSON)
-runQuery reqId query fieldName _userInfo logger _ sourceConfig tx genSql _ = do
+runQuery reqId query fieldName _userInfo logger _ sourceConfig tx genSql _ _skipReplica = do
   logQueryLog logger $ mkQueryLog query fieldName genSql reqId
   withElapsedTime
     $ newSpan ("MSSQL Query for root field " <>> fieldName) SKInternal
@@ -126,8 +128,10 @@ runSubscription ::
   MultiplexedQuery 'MSSQL ->
   [(CohortId, CohortVariables)] ->
   ResolvedConnectionTemplate 'MSSQL ->
+  -- | Whether to skip read replicas (ignored for MSSQL)
+  Bool ->
   m (DiffTime, Either QErr [(CohortId, B.ByteString)])
-runSubscription sourceConfig (MultiplexedQuery' reselect queryTags) variables _ = do
+runSubscription sourceConfig (MultiplexedQuery' reselect queryTags) variables _ _skipReplica = do
   let mssqlExecCtx = _mscExecCtx sourceConfig
       multiplexed = multiplexRootReselect variables reselect
       query = toQueryFlat (fromSelect multiplexed)

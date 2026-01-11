@@ -117,6 +117,7 @@ processRemoteJoins requestId logger agentLicenseKey env requestHeaders userInfo 
             (fmap (statsToAnyBackend @b) (EB.dbsiAction _sjcStepInfo))
             (EB.dbsiPreparedQuery _sjcStepInfo)
             (EB.dbsiResolvedConnectionTemplate _sjcStepInfo)
+            False  -- skipReplica: remote joins don't support this directive
         pure $ encJToLBS $ snd response
 
     -- How to process a remote schema join call over the network.

@@ -169,4 +169,4 @@ runCount ::
 runCount q = do
   userInfo <- askUserInfo
   sourceConfig <- askSourceConfig @('Postgres 'Vanilla) (cqSource q)
-  validateCountQ q >>= runTxWithCtx (_pscExecCtx sourceConfig) (Tx PG.ReadOnly Nothing) LegacyRQLQuery . countQToTx userInfo
+  validateCountQ q >>= runTxWithCtx (_pscExecCtx sourceConfig) (Tx PG.ReadOnly Nothing) LegacyRQLQuery False . countQToTx userInfo

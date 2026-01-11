@@ -282,12 +282,15 @@ pollStreamingQuery pollerId pollerResponseState streamingQueryOpts (sourceName, 
 
     -- concurrently process each batch and also get the processed cohort with the new updated cohort key
     batchesDetailsAndProcessedCohortsWithMaybeError <- A.forConcurrently cohortBatches $ \(batchId, cohorts) -> do
+      -- Note: skipReplica is False for subscriptions. To enable skipReplica for subscriptions,
+      -- the flag would need to be threaded through the subscription plan and poller infrastructure.
       (queryExecutionTime, mxRes) <-
         runDBStreamingSubscription @b
           sourceConfig
           query
           (over (each . _2) C._csVariables $ fmap (fmap fst) cohorts)
           resolvedConnectionTemplate
+          False
       let dbExecTimeMetric = submDBExecTotalTime $ pmSubscriptionMetrics $ prometheusMetrics
       recordSubscriptionMetric
         granularPrometheusMetricsState

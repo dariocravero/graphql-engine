@@ -66,7 +66,7 @@ import Hasura.GraphQL.Execute.Subscription.State qualified as ES
 import Hasura.GraphQL.Logging
 import Hasura.GraphQL.Namespace (RootFieldAlias (..))
 import Hasura.GraphQL.ParameterizedQueryHash (ParameterizedQueryHash)
-import Hasura.GraphQL.Parser.Directives (cached)
+import Hasura.GraphQL.Parser.Directives (cached, skipReplica)
 import Hasura.GraphQL.Transport.Backend
 import Hasura.GraphQL.Transport.HTTP
 import Hasura.GraphQL.Transport.HTTP.Protocol
@@ -535,6 +535,7 @@ onStart enabledLogTypes agentLicenseKey serverEnv wsConn shouldCaptureVariables 
   case execPlan of
     E.QueryExecutionPlan queryPlan asts dirMap -> do
       let cachedDirective = runIdentity <$> DM.lookup cached dirMap
+          skipReplicaFlag = isJust $ DM.lookup skipReplica dirMap
 
       -- We ignore the response headers (containing TTL information) because
       -- WebSockets don't support them.
@@ -571,6 +572,7 @@ onStart enabledLogTypes agentLicenseKey serverEnv wsConn shouldCaptureVariables 
                               (fmap (statsToAnyBackend @b) tx)
                               genSql
                               resolvedConnectionTemplate
+                              skipReplicaFlag
                       (finalResponse, modelInfo) <-
                         RJ.processRemoteJoins requestId logger agentLicenseKey env reqHdrs userInfo resp remoteJoins q tracesPropagator traceQueryStatus
                       pure $ (AnnotatedResponsePart telemTimeIO_DT Telem.Local finalResponse [], modelInfo)

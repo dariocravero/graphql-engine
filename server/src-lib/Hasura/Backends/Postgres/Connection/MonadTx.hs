@@ -81,11 +81,12 @@ runTxWithCtx ::
   PGExecCtx ->
   PGExecTxType ->
   PGExecFrom ->
+  Bool ->
   PG.TxET QErr m a ->
   m a
-runTxWithCtx pgExecCtx pgExecTxType pgExecFrom tx = do
+runTxWithCtx pgExecCtx pgExecTxType pgExecFrom skipReplica tx = do
   userInfo <- askUserInfo
-  runTxWithCtxAndUserInfo userInfo pgExecCtx pgExecTxType pgExecFrom tx
+  runTxWithCtxAndUserInfo userInfo pgExecCtx pgExecTxType pgExecFrom skipReplica tx
 
 runTxWithCtxAndUserInfo ::
   ( MonadIO m,
@@ -97,13 +98,14 @@ runTxWithCtxAndUserInfo ::
   PGExecCtx ->
   PGExecTxType ->
   PGExecFrom ->
+  Bool ->
   PG.TxET QErr m a ->
   m a
-runTxWithCtxAndUserInfo userInfo pgExecCtx pgExecTxType pgExecFrom tx = do
+runTxWithCtxAndUserInfo userInfo pgExecCtx pgExecTxType pgExecFrom skipReplica tx = do
   traceCtx <- Tracing.currentContext
   liftEitherM
     $ runExceptT
-    $ (_pecRunTx pgExecCtx) (PGExecCtxInfo pgExecTxType pgExecFrom)
+    $ (_pecRunTx pgExecCtx) (PGExecCtxInfo pgExecTxType pgExecFrom skipReplica)
     $ withTraceContext traceCtx
     $ withUserInfo userInfo tx
 
@@ -116,10 +118,11 @@ runQueryTx ::
   ) =>
   PGExecCtx ->
   PGExecFrom ->
+  Bool ->
   PG.TxET QErr m a ->
   m a
-runQueryTx pgExecCtx pgExecFrom tx = do
-  let pgExecCtxInfo = PGExecCtxInfo NoTxRead pgExecFrom
+runQueryTx pgExecCtx pgExecFrom skipReplica tx = do
+  let pgExecCtxInfo = PGExecCtxInfo NoTxRead pgExecFrom skipReplica
   liftEitherM
     $ runExceptT
     $ (_pecRunTx pgExecCtx) pgExecCtxInfo tx

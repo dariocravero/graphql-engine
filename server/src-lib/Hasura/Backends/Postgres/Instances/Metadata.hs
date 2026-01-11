@@ -298,7 +298,7 @@ instance
 
     result <-
       either throwError pure =<< runExceptT do
-        _pecRunTx (_pscExecCtx sourceConfig) (PGExecCtxInfo NoTxRead InternalRawQuery)
+        _pecRunTx (_pscExecCtx sourceConfig) (PGExecCtxInfo NoTxRead InternalRawQuery False)
           $ Postgres.pgFetchTableMetadata @pgKind (HashSet.singleton tableName)
 
     pure do

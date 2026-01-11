@@ -130,6 +130,6 @@ runDelete sqlGen q = do
   let strfyNum = stringifyNum sqlGen
   userInfo <- askUserInfo
   validateDeleteQ q
-    >>= runTxWithCtx (_pscExecCtx sourceConfig) (Tx PG.ReadWrite Nothing) LegacyRQLQuery
+    >>= runTxWithCtx (_pscExecCtx sourceConfig) (Tx PG.ReadWrite Nothing) LegacyRQLQuery False
     . flip runReaderT emptyQueryTagsComment
     . execDeleteQuery strfyNum Nothing userInfo

@@ -244,6 +244,6 @@ runUpdate sqlGen q = do
   userInfo <- askUserInfo
   let strfyNum = stringifyNum sqlGen
   validateUpdateQuery q
-    >>= runTxWithCtx (_pscExecCtx sourceConfig) (Tx PG.ReadWrite Nothing) LegacyRQLQuery
+    >>= runTxWithCtx (_pscExecCtx sourceConfig) (Tx PG.ReadWrite Nothing) LegacyRQLQuery False
     . flip runReaderT emptyQueryTagsComment
     . execUpdateQuery strfyNum Nothing userInfo

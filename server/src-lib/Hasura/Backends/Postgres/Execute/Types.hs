@@ -84,7 +84,9 @@ data PGExecCtxInfo = PGExecCtxInfo
   { -- | The tranasction mode for executing the transaction
     _peciTxType :: PGExecTxType,
     -- | The level from where the PG transaction is being executed from
-    _peciFrom :: PGExecFrom
+    _peciFrom :: PGExecFrom,
+    -- | Whether to skip read replicas and use the primary database
+    _peciSkipReplica :: Bool
   }
 
 -- | The tranasction mode (isolation level, transaction access) for executing the
@@ -138,27 +140,32 @@ mkPGExecCtxWithReadReplicas defaultIsoLevel primaryPool maybeReadReplicaPools re
         case resizeStrategy of
           NeverResizePool -> pure noPoolsResizedSummary
           ResizePool maxConnections -> resizeAllPools maxConnections serverReplicas,
-      _pecRunTx = \execCtxInfo -> 
+      _pecRunTx = \execCtxInfo ->
         case execCtxInfo of
-          -- For read operations, try to use read replicas if available
-          (PGExecCtxInfo NoTxRead _) -> 
+          -- If skipReplica is True, always use primary for read operations
+          (PGExecCtxInfo NoTxRead _ True) -> PG.runTx' primaryPool
+          (PGExecCtxInfo (Tx PG.ReadOnly (Just isolationLevel)) _ True) ->
+            PG.runTx primaryPool (isolationLevel, Just PG.ReadOnly)
+          (PGExecCtxInfo (Tx PG.ReadOnly Nothing) _ True) ->
+            PG.runTx primaryPool (defaultIsoLevel, Just PG.ReadOnly)
+          -- For read operations without skipReplica, try to use read replicas if available
+          (PGExecCtxInfo NoTxRead _ False) ->
             case maybeReadReplicaPools of
               Nothing -> PG.runTx' primaryPool
               Just readReplicaPools -> selectAndRunOnReadReplica readReplicaPools
-          -- All write operations go to primary
-          (PGExecCtxInfo NoTxReadWrite _) -> PG.runTx' primaryPool
-          (PGExecCtxInfo (Tx PG.ReadOnly (Just isolationLevel)) _) -> 
+          (PGExecCtxInfo (Tx PG.ReadOnly (Just isolationLevel)) _ False) ->
             case maybeReadReplicaPools of
               Nothing -> PG.runTx primaryPool (isolationLevel, Just PG.ReadOnly)
               Just readReplicaPools -> selectAndRunOnReadReplicaTx readReplicaPools isolationLevel
-          (PGExecCtxInfo (Tx PG.ReadOnly Nothing) _) -> 
+          (PGExecCtxInfo (Tx PG.ReadOnly Nothing) _ False) ->
             case maybeReadReplicaPools of
               Nothing -> PG.runTx primaryPool (defaultIsoLevel, Just PG.ReadOnly)
               Just readReplicaPools -> selectAndRunOnReadReplicaTx readReplicaPools defaultIsoLevel
-          -- Write transactions always go to primary
-          (PGExecCtxInfo (Tx PG.ReadWrite (Just isolationLevel)) _) -> 
+          -- All write operations go to primary (skipReplica doesn't matter)
+          (PGExecCtxInfo NoTxReadWrite _ _) -> PG.runTx' primaryPool
+          (PGExecCtxInfo (Tx PG.ReadWrite (Just isolationLevel)) _ _) ->
             PG.runTx primaryPool (isolationLevel, Just PG.ReadWrite)
-          (PGExecCtxInfo (Tx PG.ReadWrite Nothing) _) -> 
+          (PGExecCtxInfo (Tx PG.ReadWrite Nothing) _ _) ->
             PG.runTx primaryPool (defaultIsoLevel, Just PG.ReadWrite)
     }
   where
@@ -338,7 +345,7 @@ runPgSourceReadTx ::
   m (Either QErr a)
 runPgSourceReadTx psc = do
   let pgRunTx = _pecRunTx (_pscExecCtx psc)
-  runExceptT . pgRunTx (PGExecCtxInfo NoTxRead InternalRawQuery)
+  runExceptT . pgRunTx (PGExecCtxInfo NoTxRead InternalRawQuery False)
 
 runPgSourceWriteTx ::
   (MonadIO m, MonadBaseControl IO m) =>
@@ -348,7 +355,7 @@ runPgSourceWriteTx ::
   m (Either QErr a)
 runPgSourceWriteTx psc pgExecFrom = do
   let pgRunTx = _pecRunTx (_pscExecCtx psc)
-  runExceptT . pgRunTx (PGExecCtxInfo (Tx PG.ReadWrite Nothing) pgExecFrom)
+  runExceptT . pgRunTx (PGExecCtxInfo (Tx PG.ReadWrite Nothing) pgExecFrom False)
 
 -- | Resolve connection templates only for non-admin roles
 applyConnectionTemplateResolverNonAdmin ::

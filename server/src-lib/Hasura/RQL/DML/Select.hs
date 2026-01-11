@@ -384,4 +384,4 @@ runSelect ::
 runSelect sqlGen q = do
   sourceConfig <- askSourceConfig @('Postgres 'Vanilla) (getSourceDMLQuery q)
   userInfo <- askUserInfo
-  phaseOne sqlGen q >>= runTxWithCtx (_pscExecCtx sourceConfig) (Tx PG.ReadOnly Nothing) LegacyRQLQuery . (phaseTwo userInfo)
+  phaseOne sqlGen q >>= runTxWithCtx (_pscExecCtx sourceConfig) (Tx PG.ReadOnly Nothing) LegacyRQLQuery False . (phaseTwo userInfo)

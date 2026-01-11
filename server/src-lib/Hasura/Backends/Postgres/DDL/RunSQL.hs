@@ -234,7 +234,7 @@ runRunSQL sqlGen q@RunSQL {..} = do
         $ withUserInfo userInfo
         $ execSQL rSql
     else do
-      runTxWithCtx pgExecCtx pgExecTxType RunSQLQuery $ execSQL rSql
+      runTxWithCtx pgExecCtx pgExecTxType RunSQLQuery False $ execSQL rSql
   where
     execSQL :: (MonadTx n) => Text -> n EncJSON
     execSQL =
@@ -412,7 +412,7 @@ runTxWithMetadataCheck ::
 runTxWithMetadataCheck source sourceConfig txType tableCache functionCache cascadeDependencies tx =
   liftEitherM
     $ runExceptT
-    $ _pecRunTx (_pscExecCtx sourceConfig) (PGExecCtxInfo txType RunSQLQuery)
+    $ _pecRunTx (_pscExecCtx sourceConfig) (PGExecCtxInfo txType RunSQLQuery False)
     $ do
       -- Following steps maybe executed in a transaction depending on @'txType'.
       -- Running in a transaction helps to rollback the @'tx' execution in case of any exceptions.

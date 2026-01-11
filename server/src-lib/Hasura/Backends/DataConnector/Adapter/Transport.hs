@@ -35,9 +35,9 @@ instance BackendTransport 'DataConnector where
   runDBQuery = runDBQuery'
   runDBQueryExplain = runDBQueryExplain'
   runDBMutation = runDBMutation'
-  runDBStreamingSubscription _ _ _ _ =
+  runDBStreamingSubscription _ _ _ _ _ =
     liftIO . throwIO $ userError "runDBStreamingSubscription: not implemented for the Data Connector backend."
-  runDBSubscription _ _ _ _ =
+  runDBSubscription _ _ _ _ _ =
     liftIO . throwIO $ userError "runDBSubscription: not implemented for the Data Connector backend."
 
 runDBQuery' ::
@@ -57,8 +57,10 @@ runDBQuery' ::
   OnBaseMonad AgentClientT (Maybe (AnyBackend HGL.ExecutionStats), EncJSON) ->
   Maybe DataConnectorPreparedQuery ->
   ResolvedConnectionTemplate 'DataConnector ->
+  -- | Whether to skip read replicas (ignored for DataConnector)
+  Bool ->
   m (DiffTime, EncJSON)
-runDBQuery' requestId query fieldName _userInfo logger licenseKeyCacheMaybe sourceConfig@SourceConfig {..} action queryRequest _ = do
+runDBQuery' requestId query fieldName _userInfo logger licenseKeyCacheMaybe sourceConfig@SourceConfig {..} action queryRequest _ _skipReplica = do
   agentAuthKey <-
     for licenseKeyCacheMaybe \licenseKeyCache -> do
       (key, _requestKeyRefresh) <- liftIO $ atomically $ getCredential licenseKeyCache

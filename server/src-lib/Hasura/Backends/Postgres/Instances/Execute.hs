@@ -213,7 +213,7 @@ pgDBSubscriptionExplain plan = do
   explanationLines <-
     liftEitherM
       $ runExceptT
-      $ _pecRunTx pgExecCtx (PGExecCtxInfo (Tx PG.ReadOnly Nothing) (GraphQLQuery resolvedConnectionTemplate))
+      $ _pecRunTx pgExecCtx (PGExecCtxInfo (Tx PG.ReadOnly Nothing) (GraphQLQuery resolvedConnectionTemplate) False)
       $ map runIdentity
       <$> PGL.executeQuery explainQuery [(cohortId, _sqpVariables plan)]
   pure $ SubscriptionQueryPlanExplanation queryText explanationLines $ _sqpVariables plan
@@ -511,7 +511,7 @@ pgDBLiveQuerySubscriptionPlan removeEmptySubscriptionResponses userInfo sourceNa
   -- It is disposed when the subscriber is added to existing cohort.
   cohortId <- newCohortId
 
-  let pgExecCtxInfo = PGExecCtxInfo (Tx PG.ReadOnly Nothing) (GraphQLQuery resolvedConnectionTemplate)
+  let pgExecCtxInfo = PGExecCtxInfo (Tx PG.ReadOnly Nothing) (GraphQLQuery resolvedConnectionTemplate) False
   cohortVariables <- liftEitherM $ liftIO $ runExceptT $ _pecRunTx (_pscExecCtx sourceConfig) pgExecCtxInfo do
     -- We need to ensure that the values provided for variables are correct according to Postgres.
     -- Without this check an invalid value for a variable for one instance of the subscription will
@@ -575,7 +575,7 @@ pgDBStreamingSubscriptionPlan removeEmptySubscriptionResponses userInfo sourceNa
   -- It is disposed when the subscriber is added to existing cohort.
   cohortId <- newCohortId
 
-  let pgExecCtxInfo = PGExecCtxInfo (Tx PG.ReadOnly Nothing) (GraphQLQuery resolvedConnectionTemplate)
+  let pgExecCtxInfo = PGExecCtxInfo (Tx PG.ReadOnly Nothing) (GraphQLQuery resolvedConnectionTemplate) False
   cohortVariables <- liftEitherM $ liftIO $ runExceptT $ _pecRunTx (_pscExecCtx sourceConfig) pgExecCtxInfo do
     -- We need to ensure that the values provided for variables are correct according to Postgres.
     -- Without this check an invalid value for a variable for one instance of the subscription will
